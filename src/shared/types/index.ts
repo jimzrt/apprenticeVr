@@ -263,6 +263,7 @@ export interface DownloadAPI {
   deleteDownloadedFiles: (releaseName: string) => Promise<boolean>
   setDownloadPath: (path: string) => void
   setAppConnectionState: (selectedDevice: string | null, isConnected: boolean) => void
+  refreshLocalStorage: () => Promise<{ added: number; updated: number; total: number }>
 }
 
 export interface DownloadAPIRenderer extends DownloadAPI {

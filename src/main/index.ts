@@ -328,10 +328,6 @@ app.whenReady().then(async () => {
     await downloadService.removeFromQueue(releaseName)
   })
 
-  typedIpcMain.on('download:cancel', (_event, releaseName) =>
-    downloadService.cancelUserRequest(releaseName)
-  )
-
   typedIpcMain.on('download:retry', (_event, releaseName) =>
     downloadService.retryDownload(releaseName)
   )
@@ -611,6 +607,11 @@ app.whenReady().then(async () => {
   typedIpcMain.handle('downloads:copy-obb-folder', async (_event, folderPath, deviceId) => {
     console.log(`[IPC] OBB folder copy requested for ${folderPath} on device ${deviceId}`)
     return await downloadService.copyObbFolder(folderPath, deviceId)
+  })
+
+  typedIpcMain.handle('downloads:refresh-local-storage', async () => {
+    console.log('[IPC] Refresh local storage requested')
+    return await downloadService.refreshLocalStorage()
   })
 
   // Validate that all IPC channels have handlers registered

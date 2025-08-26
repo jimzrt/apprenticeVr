@@ -95,9 +95,15 @@ const filterGameNameAndPackage: FilterFn<GameInfo> = (row, _columnId, filterValu
   )
 }
 
+const filterBoolean: FilterFn<GameInfo> = (row, columnId, filterValue) => {
+  const value = row.getValue(columnId)
+  return Boolean(value) === Boolean(filterValue)
+}
+
 declare module '@tanstack/react-table' {
   interface FilterFns {
     gameNameAndPackageFilter: FilterFn<GameInfo>
+    isInstalledFilter: FilterFn<GameInfo>
   }
 }
 
@@ -153,6 +159,29 @@ const useStyles = makeStyles({
   filterButtons: {
     display: 'flex',
     gap: tokens.spacingHorizontalS
+  },
+  filterCheckbox: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXS,
+    padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
+    borderRadius: tokens.borderRadiusMedium,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    backgroundColor: tokens.colorNeutralBackground1,
+    cursor: 'pointer',
+    '&:hover': {
+      backgroundColor: tokens.colorNeutralBackground2
+    },
+    '& input[type="checkbox"]': {
+      margin: 0,
+      cursor: 'pointer'
+    },
+    '& label': {
+      cursor: 'pointer',
+      fontSize: '14px',
+      color: tokens.colorNeutralForeground1,
+      userSelect: 'none'
+    }
   },
   toolbarRight: {
     display: 'flex',
@@ -282,6 +311,60 @@ const GamesView: React.FC<GamesViewProps> = ({ onBackToDevices }) => {
   const [showObbConfirmDialog, setShowObbConfirmDialog] = useState<boolean>(false)
   const [obbFolderToConfirm, setObbFolderToConfirm] = useState<string | null>(null)
 
+  // Add CSS styles for the filter checkbox
+  useEffect(() => {
+    const style = document.createElement('style')
+    style.textContent = `
+      .filter-checkbox {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 12px;
+        border-radius: 6px;
+        border: 1px solid #d1d1d1;
+        background-color: transparent;
+        cursor: pointer;
+        transition: background-color 0.2s;
+        white-space: nowrap;
+      }
+      .filter-checkbox:hover {
+        background-color: rgba(0, 0, 0, 0.05);
+      }
+      .filter-checkbox input[type="checkbox"] {
+        margin: 0;
+        cursor: pointer;
+        width: 16px;
+        height: 16px;
+      }
+      .filter-checkbox label {
+        cursor: pointer;
+        font-size: 14px;
+        color: inherit;
+        user-select: none;
+        margin: 0;
+      }
+      .filter-buttons {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .games-toolbar-right {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+      }
+      .game-count {
+        font-size: 14px;
+        color: #605e5c;
+        white-space: nowrap;
+      }
+    `
+    document.head.appendChild(style)
+    return () => {
+      document.head.removeChild(style)
+    }
+  }, [])
+
   const counts = useMemo(() => {
     const total = games.length
     const installed = games.filter((g) => g.isInstalled).length
@@ -338,6 +421,17 @@ const GamesView: React.FC<GamesViewProps> = ({ onBackToDevices }) => {
           status: item.status,
           progress: progress
         })
+      }
+    })
+    return map
+  }, [downloadQueue])
+
+  // Map releaseName -> local download path for quick lookup when displaying "Downloaded"
+  const downloadPathMap = useMemo(() => {
+    const map = new Map<string, string>()
+    downloadQueue.forEach((item) => {
+      if (item.releaseName && item.downloadPath) {
+        map.set(item.releaseName, item.downloadPath)
       }
     })
     return map
@@ -563,7 +657,39 @@ const GamesView: React.FC<GamesViewProps> = ({ onBackToDevices }) => {
         accessorKey: 'size',
         header: 'Size',
         size: COLUMN_WIDTHS.SIZE,
-        cell: (info) => info.getValue() || '-',
+        cell: (info) => {
+          const game = info.row.original
+          const size = info.getValue() || '-'
+          const downloadInfo = game.releaseName
+            ? downloadStatusMap.get(game.releaseName)
+            : undefined
+          const isDownloaded = downloadInfo?.status === 'Completed'
+          const localPath = isDownloaded && game.releaseName
+            ? downloadPathMap.get(game.releaseName)
+            : undefined
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <span>{size as string}</span>
+              {isDownloaded && localPath && (
+                <span
+                  title={localPath}
+                  style={{
+                    color: tokens.colorNeutralForeground3,
+                    fontSize: '11px',
+                    fontFamily: 'monospace',
+                    marginTop: 2,
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    maxWidth: '100%'
+                  }}
+                >
+                  {localPath}
+                </span>
+              )}
+            </div>
+          )
+        },
         enableResizing: true
       },
       {
@@ -576,7 +702,21 @@ const GamesView: React.FC<GamesViewProps> = ({ onBackToDevices }) => {
       {
         accessorKey: 'isInstalled',
         header: 'Installed Status',
-        enableResizing: false
+        enableResizing: false,
+        filterFn: 'isInstalledFilter'
+      },
+      {
+        id: 'isDownloaded',
+        header: 'Downloaded Status',
+        enableResizing: false,
+        filterFn: 'isInstalledFilter',
+        accessorFn: (row) => {
+          return downloadQueue.some(item => item.releaseName === row.releaseName && item.status === 'Completed')
+        },
+        cell: (info) => {
+          const isDownloaded = info.getValue() as boolean
+          return isDownloaded ? 'Downloaded' : 'Not Downloaded'
+        }
       },
       {
         accessorKey: 'hasUpdate',
@@ -584,20 +724,22 @@ const GamesView: React.FC<GamesViewProps> = ({ onBackToDevices }) => {
         enableResizing: false
       }
     ]
-  }, [downloadStatusMap, styles, tableWidth])
+  }, [downloadStatusMap, styles, tableWidth, downloadPathMap])
 
   const table = useReactTable({
     data: games,
     columns,
     columnResizeMode: 'onChange',
+    enableColumnFilters: true,
     filterFns: {
-      gameNameAndPackageFilter: filterGameNameAndPackage
+      gameNameAndPackageFilter: filterGameNameAndPackage,
+      isInstalledFilter: filterBoolean
     },
     state: {
       sorting,
       globalFilter,
       columnFilters,
-      columnVisibility: { isInstalled: false, hasUpdate: false },
+      columnVisibility: { isInstalled: false, hasUpdate: false, isDownloaded: false },
       columnSizing
     },
     onSortingChange: setSorting,
@@ -610,7 +752,9 @@ const GamesView: React.FC<GamesViewProps> = ({ onBackToDevices }) => {
     getSortedRowModel: getSortedRowModel()
   })
 
-  const { rows } = table.getRowModel()
+
+
+  const { rows } = table.getFilteredRowModel()
   const rowVirtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => tableContainerRef.current,
@@ -1187,6 +1331,7 @@ const GamesView: React.FC<GamesViewProps> = ({ onBackToDevices }) => {
                 )}
               </div>
             )}
+
           </div>
         </div>
         <div
@@ -1284,32 +1429,105 @@ const GamesView: React.FC<GamesViewProps> = ({ onBackToDevices }) => {
             </Menu>
             <span className="last-synced">Last synced: {formatDate(lastSyncTime)}</span>
             {isConnected && (
-              <div className="filter-buttons">
-                <button
-                  onClick={() => setActiveFilter('all')}
-                  className={activeFilter === 'all' ? 'active' : ''}
-                >
-                  All ({counts.total})
-                </button>
-                <button
-                  onClick={() => setActiveFilter('installed')}
-                  className={activeFilter === 'installed' ? 'active' : ''}
-                >
-                  Installed ({counts.installed})
-                </button>
-                <button
-                  onClick={() => setActiveFilter('update')}
-                  className={activeFilter === 'update' ? 'active' : ''}
-                  disabled={counts.updates === 0}
-                >
-                  Updates ({counts.updates})
-                </button>
+              <div
+                style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalXS }}
+              >
+                {isEditingUserName ? (
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: tokens.spacingHorizontalXS
+                    }}
+                  >
+                    <Input
+                      value={editUserNameValue}
+                      onChange={(e) => setEditUserNameValue(e.target.value)}
+                      placeholder="Enter your VR gaming name"
+                      size="small"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          handleSaveUserName()
+                        } else if (e.key === 'Escape') {
+                          handleCancelEditUserName()
+                        }
+                      }}
+                      autoFocus
+                    />
+                    <Button
+                      appearance="subtle"
+                      size="small"
+                      onClick={handleSaveUserName}
+                      disabled={loadingUserName || !editUserNameValue.trim()}
+                    >
+                      {loadingUserName ? <Spinner size="tiny" /> : 'Save'}
+                    </Button>
+                    <Button
+                      appearance="subtle"
+                      size="small"
+                      onClick={handleCancelEditUserName}
+                      disabled={loadingUserName}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: tokens.spacingHorizontalXS
+                    }}
+                  >
+                    <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
+                      Username in Multiplayer Games:
+                    </Text>
+                    <Button
+                      appearance="subtle"
+                      size="small"
+                      icon={<PersonRegular />}
+                      iconPosition="before"
+                      onClick={handleEditUserName}
+                      style={{
+                        minHeight: 'auto',
+                        padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
+                        borderRadius: tokens.borderRadiusMedium,
+                        border: `1px solid ${tokens.colorNeutralStroke2}`,
+                        backgroundColor: tokens.colorNeutralBackground1
+                      }}
+                      title="Click to change your VR gaming name (appears in games and apps)"
+                    >
+                      {userName || 'Click to set'}
+                      <EditRegular
+                        style={{ marginLeft: tokens.spacingHorizontalXS, fontSize: '12px' }}
+                      />
+                    </Button>
+                  </div>
+                )}
               </div>
             )}
+
           </div>
         </div>
         <div className="games-toolbar-right">
           <span className="game-count">{table.getFilteredRowModel().rows.length} displayed</span>
+          <div className="filter-checkbox">
+            <input
+              type="checkbox"
+              id="downloaded-only"
+              checked={columnFilters.some(f => f.id === 'isDownloaded' && f.value === true)}
+              onChange={(e) => {
+                if (e.target.checked) {
+                  const newFilters = [...columnFilters.filter(f => f.id !== 'isDownloaded'), { id: 'isDownloaded', value: true }]
+                  setColumnFilters(newFilters)
+                } else {
+                  const newFilters = columnFilters.filter(f => f.id !== 'isDownloaded')
+                  setColumnFilters(newFilters)
+                }
+              }}
+            />
+            <label htmlFor="downloaded-only">Show only downloaded games</label>
+          </div>
           <Input
             value={globalFilter ?? ''}
             onChange={(e) => setGlobalFilter(String(e.target.value))}

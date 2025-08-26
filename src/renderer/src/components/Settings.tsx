@@ -30,6 +30,7 @@ import {
 import { useSettings } from '../hooks/useSettings'
 import { useGames } from '../hooks/useGames'
 import { useLogs } from '../hooks/useLogs'
+import { useDownload } from '../hooks/useDownload'
 
 // Supported speed units with conversion factors to KB/s
 const SPEED_UNITS = [
@@ -79,7 +80,8 @@ const useStyles = makeStyles({
     marginTop: tokens.spacingVerticalM,
     gap: tokens.spacingHorizontalM,
     width: '100%',
-    maxWidth: '800px'
+    maxWidth: '800px',
+    flexWrap: 'wrap'
   },
   input: {
     flexGrow: 1
@@ -408,6 +410,7 @@ const Settings: React.FC = () => {
 
   const [localError, setLocalError] = useState<string | null>(null)
   const [saveSuccess, setSaveSuccess] = useState(false)
+  const [refreshResults, setRefreshResults] = useState<{ added: number; updated: number; total: number } | null>(null)
 
   // Update local state when the context values change
   useEffect(() => {
@@ -527,6 +530,31 @@ const Settings: React.FC = () => {
     } catch (err) {
       console.error('Error selecting folder:', err)
       setLocalError('Failed to select folder')
+    }
+  }
+
+  const handleRefreshLocalStorage = async (): Promise<void> => {
+    try {
+      setLocalError(null)
+      setSaveSuccess(false)
+      
+      // Trigger a refresh of the download service to scan for existing completed downloads
+      // This will update the download queue with any local files found
+      const result = await window.api.downloads.refreshLocalStorage()
+      
+      // Show success message with details
+      const message = `Local storage refreshed successfully! Found ${result.added} new items and updated ${result.updated} existing items. Total: ${result.total} items.`
+      setSaveSuccess(true)
+      setRefreshResults(result)
+      
+      // Reset success message after 5 seconds (longer since there's more info)
+      setTimeout(() => {
+        setSaveSuccess(false)
+        setRefreshResults(null)
+      }, 5000)
+    } catch (err) {
+      console.error('Error refreshing local storage:', err)
+      setLocalError('Failed to refresh local storage')
     }
   }
 
@@ -708,6 +736,9 @@ const Settings: React.FC = () => {
               <Button onClick={handleSaveDownloadPath} appearance="primary" size="large">
                 Save Path
               </Button>
+              <Button onClick={handleRefreshLocalStorage} appearance="outline" size="large">
+                Refresh Local Storage
+              </Button>
             </div>
 
             <div className={styles.speedLimitSection}>
@@ -798,6 +829,12 @@ const Settings: React.FC = () => {
               <Text className={styles.success}>
                 <CheckmarkCircleRegular />
                 Settings saved successfully
+              </Text>
+            )}
+            {refreshResults && (
+              <Text className={styles.success}>
+                <CheckmarkCircleRegular />
+                Local storage refreshed successfully! Found {refreshResults.added} new items and updated {refreshResults.updated} existing items. Total: {refreshResults.total} items.
               </Text>
             )}
           </div>

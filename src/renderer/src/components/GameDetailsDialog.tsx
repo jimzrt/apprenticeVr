@@ -30,11 +30,13 @@ import {
   InfoRegular,
   CheckmarkCircleRegular,
   VideoRegular,
-  BroomRegular as UninstallIcon
+  BroomRegular as UninstallIcon,
+  DesktopRegular
 } from '@fluentui/react-icons'
 import placeholderImage from '../assets/images/game-placeholder.png'
 import YouTube from 'react-youtube'
 import { useGames } from '@renderer/hooks/useGames'
+import { useDownload } from '@renderer/hooks/useDownload'
 
 const useStyles = makeStyles({
   dialogContentLayout: {
@@ -187,6 +189,12 @@ const GameDetailsDialog: React.FC<GameDetailsDialogProps> = ({
   const [loadingNote, setLoadingNote] = useState<boolean>(false)
   const [videoId, setVideoId] = useState<string | null>(null)
   const [loadingVideo, setLoadingVideo] = useState<boolean>(false)
+  const { queue: downloadQueue } = useDownload()
+  const localPath = (() => {
+    if (!game?.releaseName) return undefined
+    const item = downloadQueue.find((i) => i.releaseName === game.releaseName)
+    return item?.status === 'Completed' ? item.downloadPath : undefined
+  })()
 
   // Fetch note when dialog opens or game changes
   useEffect(() => {
@@ -483,6 +491,14 @@ const GameDetailsDialog: React.FC<GameDetailsDialogProps> = ({
                         <DocumentDataRegular fontSize={16} />
                         <Text size={300}>{game.size || '-'}</Text>
                       </div>
+                      {localPath && (
+                        <div className={styles.inlineInfo}>
+                          <DesktopRegular fontSize={16} />
+                          <Text size={300} title={localPath} style={{ fontFamily: 'monospace' }}>
+                            {localPath}
+                          </Text>
+                        </div>
+                      )}
                       <div className={styles.inlineInfo}>
                         <DownloadIcon fontSize={16} />
                         <Text size={300}>{game.downloads?.toLocaleString() || '-'}</Text>
