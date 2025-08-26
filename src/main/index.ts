@@ -328,6 +328,10 @@ app.whenReady().then(async () => {
     await downloadService.removeFromQueue(releaseName)
   })
 
+  typedIpcMain.on('download:cancel', (_event, releaseName) =>
+    downloadService.cancelUserRequest(releaseName)
+  )
+
   typedIpcMain.on('download:retry', (_event, releaseName) =>
     downloadService.retryDownload(releaseName)
   )
