@@ -754,7 +754,7 @@ const GamesView: React.FC<GamesViewProps> = ({ onBackToDevices }) => {
 
 
 
-  const { rows } = table.getFilteredRowModel()
+  const { rows } = table.getSortedRowModel()
   const rowVirtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => tableContainerRef.current,
