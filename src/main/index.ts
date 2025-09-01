@@ -613,6 +613,11 @@ app.whenReady().then(async () => {
     return await downloadService.copyObbFolder(folderPath, deviceId)
   })
 
+  typedIpcMain.handle('downloads:refresh-local-storage', async () => {
+    console.log('[IPC] Refresh local storage requested')
+    return await downloadService.refreshLocalStorage()
+  })
+
   // Validate that all IPC channels have handlers registered
   const allHandled = typedIpcMain.validateAllHandlersRegistered()
   if (!allHandled) {

@@ -124,6 +124,7 @@ export interface IPCChannels {
   // Manual installation channels
   'downloads:install-manual': DefineChannel<[filePath: string, deviceId: string], boolean>
   'downloads:copy-obb-folder': DefineChannel<[folderPath: string, deviceId: string], boolean>
+  'downloads:refresh-local-storage': DefineChannel<[], { added: number; updated: number; total: number }>
 }
 
 // Types for send (no response) channels

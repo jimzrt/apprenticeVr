@@ -1,5 +1,5 @@
 import { BrowserWindow } from 'electron'
-import { promises as fs, existsSync } from 'fs'
+import { promises as fs, existsSync, readdirSync } from 'fs'
 import adbService from './adbService'
 import { EventEmitter } from 'events'
 import { debounce } from './download/utils'
@@ -10,6 +10,8 @@ import { InstallationProcessor } from './download/installationProcessor'
 import { DownloadAPI, GameInfo, DownloadItem, DownloadStatus } from '@shared/types'
 import settingsService from './settingsService'
 import { typedWebContentsSend } from '@shared/ipc-utils'
+import { join } from 'path'
+import gameService from './gameService'
 
 interface VrpConfig {
   baseUri?: string
@@ -34,6 +36,10 @@ class DownloadService extends EventEmitter implements DownloadAPI {
     const downloadPath = settingsService.getDownloadPath()
     settingsService.on('download-path-changed', (path) => {
       this.setDownloadPath(path)
+      // Trigger a re-scan when the downloads path changes
+      this.scanExistingCompletedDownloads().catch((e) =>
+        console.warn('[Service] scanExistingCompletedDownloads on path change failed:', e)
+      )
     })
     this.downloadsPath = downloadPath
 
@@ -51,6 +57,46 @@ class DownloadService extends EventEmitter implements DownloadAPI {
 
   setDownloadPath(path: string): void {
     this.downloadsPath = path
+    // Update paths for existing items that might have moved to the new location
+    this.updateExistingItemPaths(path)
+  }
+
+  private updateExistingItemPaths(newBasePath: string): void {
+    try {
+      const queue = this.queueManager.getQueue()
+      let updatedCount = 0
+
+      for (const item of queue) {
+        if (item.releaseName && item.status === 'Completed') {
+          const newPath = join(newBasePath, item.releaseName)
+          if (existsSync(newPath)) {
+            // Check if this path contains the expected content
+            try {
+              const contents = readdirSync(newPath)
+              const hasApk = contents.some((f) => f.toLowerCase().endsWith('.apk'))
+              const hasInstallScript = contents.some(
+                (f) => f.toLowerCase() === 'install.txt' || f.toLowerCase() === 'install'
+              )
+              
+              if (hasApk || hasInstallScript) {
+                console.log(`[Service] Updating path for moved item ${item.releaseName}: ${item.downloadPath} -> ${newPath}`)
+                this.queueManager.updateItem(item.releaseName, { downloadPath: newPath })
+                updatedCount++
+              }
+            } catch (e) {
+              console.warn(`[Service] Could not verify contents of ${newPath}:`, e)
+            }
+          }
+        }
+      }
+
+      if (updatedCount > 0) {
+        console.log(`[Service] Updated ${updatedCount} item paths after download path change.`)
+        this.emitUpdate()
+      }
+    } catch (e) {
+      console.warn('[Service] Error updating existing item paths:', e)
+    }
   }
 
   setAppConnectionState(selectedDevice: string | null, isConnected: boolean): void {
@@ -88,6 +134,9 @@ class DownloadService extends EventEmitter implements DownloadAPI {
 
     await fs.mkdir(this.downloadsPath, { recursive: true })
     await this.queueManager.loadQueue()
+
+    // Import any existing completed downloads present on disk into the queue
+    await this.scanExistingCompletedDownloads()
 
     const changed = this.queueManager.updateAllItems(
       (item) =>
@@ -474,7 +523,7 @@ class DownloadService extends EventEmitter implements DownloadAPI {
     return Promise.resolve()
   }
 
-  public retryDownload(releaseName: string): Promise<void> {
+  public retryDownload(releaseName: string): void {
     const item = this.queueManager.findItem(releaseName)
     if (
       item &&
@@ -514,7 +563,6 @@ class DownloadService extends EventEmitter implements DownloadAPI {
     } else {
       console.warn(`[Service Retry] Cannot retry ${releaseName} - status: ${item?.status}`)
     }
-    return Promise.resolve()
   }
 
   public pauseDownload(releaseName: string): void {
@@ -879,6 +927,123 @@ class DownloadService extends EventEmitter implements DownloadAPI {
     } catch (error) {
       console.error(`[Service copyObbFolder] Error during OBB folder copy of ${folderPath}:`, error)
       return false
+    }
+  }
+
+  public async refreshLocalStorage(): Promise<{ added: number; updated: number; total: number }> {
+    console.log('[Service] Refresh local storage requested')
+    try {
+      const beforeCount = this.queueManager.getQueue().length
+      await this.scanExistingCompletedDownloads()
+      const afterCount = this.queueManager.getQueue().length
+      
+      const added = afterCount - beforeCount
+      const updated = 0 // This would need to be tracked in scanExistingCompletedDownloads
+      
+      console.log(`[Service] Local storage refresh completed successfully. Queue: ${beforeCount} -> ${afterCount}`)
+      return { added, updated, total: afterCount }
+    } catch (error) {
+      console.error('[Service] Error during local storage refresh:', error)
+      throw error
+    }
+  }
+
+  private async scanExistingCompletedDownloads(): Promise<void> {
+    try {
+      const basePath = this.downloadsPath
+      if (!basePath || !existsSync(basePath)) {
+        console.warn('[Service] scanExistingCompletedDownloads: downloadsPath missing or invalid')
+        return
+      }
+
+      const entries = await fs.readdir(basePath, { withFileTypes: true })
+      const folders = entries.filter((e) => e.isDirectory()).map((e) => e.name)
+      if (folders.length === 0) return
+
+      // Build a quick index of existing queue items by releaseName
+      const existing = new Map<string, DownloadItem>()
+      this.queueManager.getQueue().forEach((item) => {
+        if (item.releaseName) {
+          existing.set(item.releaseName, item)
+        }
+      })
+
+      // Load known games to match folder names to releaseName
+      let games: GameInfo[] = []
+      try {
+        games = await gameService.getGames()
+      } catch (e) {
+        console.warn('[Service] scanExistingCompletedDownloads: failed to load games list:', e)
+      }
+      const gameByRelease = new Map<string, GameInfo>()
+      games.forEach((g) => {
+        if (g.releaseName) gameByRelease.set(g.releaseName, g)
+      })
+
+      let addedCount = 0
+      let updatedCount = 0
+
+      for (const folderName of folders) {
+        const folderPath = join(basePath, folderName)
+        
+        // Heuristic: consider a folder a completed download if it contains any APK files or an install script
+        let looksCompleted = false
+        try {
+          const sub = await fs.readdir(folderPath)
+          const hasApk = sub.some((f) => f.toLowerCase().endsWith('.apk'))
+          const hasInstallScript = sub.some(
+            (f) => f.toLowerCase() === 'install.txt' || f.toLowerCase() === 'install'
+          )
+          looksCompleted = hasApk || hasInstallScript
+        } catch (e) {
+          console.warn('[Service] scanExistingCompletedDownloads: cannot read folder:', folderPath)
+        }
+        if (!looksCompleted) continue
+
+        const matchedGame = gameByRelease.get(folderName)
+        const existingItem = existing.get(folderName)
+
+        if (existingItem) {
+          // Update existing item if path has changed
+          if (existingItem.downloadPath !== folderPath) {
+            console.log(`[Service] Updating path for existing item ${folderName}: ${existingItem.downloadPath} -> ${folderPath}`)
+            this.queueManager.updateItem(folderName, {
+              downloadPath: folderPath,
+              // Also update other fields if we have better game info
+              gameName: matchedGame?.name || existingItem.gameName,
+              packageName: matchedGame?.packageName || existingItem.packageName,
+              thumbnailPath: matchedGame?.thumbnailPath || existingItem.thumbnailPath,
+              size: matchedGame?.size || existingItem.size
+            })
+            updatedCount++
+          }
+        } else {
+          // Add new item
+          const newItem: DownloadItem = {
+            gameId: matchedGame?.id || folderName,
+            releaseName: folderName,
+            packageName: matchedGame?.packageName || '',
+            gameName: matchedGame?.name || folderName,
+            status: 'Completed',
+            progress: 100,
+            extractProgress: 100,
+            addedDate: Date.now(),
+            thumbnailPath: matchedGame?.thumbnailPath,
+            downloadPath: folderPath,
+            size: matchedGame?.size
+          }
+
+          this.queueManager.addItem(newItem)
+          addedCount++
+        }
+      }
+
+      if (addedCount > 0 || updatedCount > 0) {
+        console.log(`[Service] Imported ${addedCount} new and updated ${updatedCount} existing download item(s) from disk.`)
+        this.emitUpdate()
+      }
+    } catch (e) {
+      console.warn('[Service] scanExistingCompletedDownloads encountered an error:', e)
     }
   }
 }
