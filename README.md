@@ -101,7 +101,7 @@ Ensure you can access the following URLs from your browser:
 
 - [https://vrpirates.wiki/](https://vrpirates.wiki/)
 
-- [https://go.vrpyourself.online/](https://go.vrpyourself.online/)  
+- [https://there-is-a.vrpmonkey.help/](https://there-is-a.vrpmonkey.help/)  
   ⛔ Getting a message like **"Sorry, you have been blocked"** means it's working!
 
 ---
@@ -140,7 +140,7 @@ You can either:
   - `raw.githubusercontent.com`
   - `downloads.rclone.org`
   - `vrpirates.wiki`
-  - `go.vrpyourself.online`
+  - `there-is-a.vrpmonkey.help`
 
 ---
 

@@ -112,7 +112,7 @@ class DependencyService {
     const criticalUrls = [
       { url: 'https://raw.githubusercontent.com', name: 'GitHub' },
       { url: 'https://vrpirates.wiki', name: 'VRP Wiki' },
-      { url: 'https://go.vrpyourself.online', name: 'VRP Mirror' }
+      { url: 'https://there-is-a.vrpmonkey.help', name: 'VRP Mirror' }
     ]
 
     const failedUrls: string[] = []
