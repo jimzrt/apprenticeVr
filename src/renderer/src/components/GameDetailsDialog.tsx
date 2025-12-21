@@ -33,7 +33,7 @@ import {
   BroomRegular as UninstallIcon
 } from '@fluentui/react-icons'
 import placeholderImage from '../assets/images/game-placeholder.png'
-import YouTube from 'react-youtube'
+
 import { useGames } from '@renderer/hooks/useGames'
 
 const useStyles = makeStyles({
@@ -542,16 +542,14 @@ const GameDetailsDialog: React.FC<GameDetailsDialogProps> = ({
                   <Spinner size="tiny" label="Searching for trailer..." />
                 ) : videoId ? (
                   <div className={styles.youtubeContainer}>
-                    <YouTube
-                      videoId={videoId}
+                    <iframe
+                      src={`https://www.youtube.com/embed/${videoId}?autoplay=0`}
                       className={styles.youtubePlayer}
-                      opts={{
-                        width: '100%',
-                        height: '100%',
-                        playerVars: {
-                          autoplay: 0
-                        }
-                      }}
+                      title="YouTube video player"
+                      frameBorder="0"
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                      allowFullScreen
+                      referrerPolicy="strict-origin-when-cross-origin"
                     />
                   </div>
                 ) : (

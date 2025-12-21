@@ -80,9 +80,6 @@ importers:
       pingman:
         specifier: ^2.0.0
         version: 2.0.0
-      react-youtube:
-        specifier: ^10.1.0
-        version: 10.1.0(react@19.1.0)
       use-disposable:
         specifier: ^1.0.4
         version: 1.0.4(@types/react-dom@19.1.6(@types/react@19.1.8))(@types/react@19.1.8)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
@@ -1999,14 +1996,6 @@ packages:
   date-fns@4.1.0:
     resolution: {integrity: sha512-Ukq0owbQXxa/U3EGtsdVBkR1w7KOQ5gIBqdH2hkvknzZPYvBxb/aa6E8L7tmjFtkwZBu3UXBbjIgPo/Ez4xaNg==}
 
-  debug@2.6.9:
-    resolution: {integrity: sha512-bC7ElrdJaJnPbAP+1EotYvqZsb3ecl5wi6Bfi6BJTUcNowp6cvspg0jXznRTKDjm/E7AdgFBVeAPVMNcKGsHMA==}
-    peerDependencies:
-      supports-color: '*'
-    peerDependenciesMeta:
-      supports-color:
-        optional: true
-
   debug@4.3.7:
     resolution: {integrity: sha512-Er2nc/H7RrMXZBFCEim6TCmMk02Z8vLC2Rbi1KEBggpo0fS6l0S1nnapwmIi3yW/+GOJap1Krg4w0Hg80oCqgQ==}
     engines: {node: '>=6.0'}
@@ -2967,9 +2956,6 @@ packages:
     resolution: {integrity: sha512-+bT2uH4E5LGE7h/n3evcS/sQlJXCpIp6ym8OWJ5eV6+67Dsql/LaaT7qJBAt2rzfoa/5QBGBhxDix1dMt2kQKQ==}
     engines: {node: '>= 0.8.0'}
 
-  load-script@1.0.0:
-    resolution: {integrity: sha512-kPEjMFtZvwL9TaZo0uZ2ml+Ye9HUMmPwbYRJ324qF9tqMejwykJ5ggTyvzmrbBeapCAbk98BSbTeovHEEP1uCA==}
-
   locate-path@6.0.0:
     resolution: {integrity: sha512-iPZK6eYjbxRu3uB4/WZ3EsEIMJFMqAoopl3R+zuq0UjcAm/MO6KCweDgPfP3elTztoKP3KtnVHxTn2NHBSDVUw==}
     engines: {node: '>=10'}
@@ -3171,9 +3157,6 @@ packages:
     resolution: {integrity: sha512-vVqVZQyf3WLx2Shd0qJ9xuvqgAyKPLAiqITEtqW0oIUjzo3PePDd6fW9iFz30ef7Ysp/oiWqbhszeGWW2T6Gzw==}
     engines: {node: '>=10'}
     hasBin: true
-
-  ms@2.0.0:
-    resolution: {integrity: sha512-Tpp60P6IUJDTuOq/5Z8cdskzJujfwqfOTkrwIwj7IRISpnkJnT6SyJ4PCPnGMoFjC9ddhal5KVIYtAt97ix05A==}
 
   ms@2.1.3:
     resolution: {integrity: sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==}
@@ -3521,12 +3504,6 @@ packages:
       react: '>=16.6.0'
       react-dom: '>=16.6.0'
 
-  react-youtube@10.1.0:
-    resolution: {integrity: sha512-ZfGtcVpk0SSZtWCSTYOQKhfx5/1cfyEW1JN/mugGNfAxT3rmVJeMbGpA9+e78yG21ls5nc/5uZJETE3cm3knBg==}
-    engines: {node: '>= 14.x'}
-    peerDependencies:
-      react: '>=0.14.1'
-
   react@19.1.0:
     resolution: {integrity: sha512-FS+XFBNvn3GTAWq26joslQgWNoFu08F4kl0J4CgdNKADkdSGXQyTCnKteIAJy96Br6YbpEU1LSzV5dYtjMkMDg==}
     engines: {node: '>=0.10.0'}
@@ -3727,9 +3704,6 @@ packages:
   simple-update-notifier@2.0.0:
     resolution: {integrity: sha512-a2B9Y0KlNXl9u/vsW6sTIu9vGEpfKu2wRV6l1H3XEas/0gUIzGzBoP/IouTcUQbm9JWZLH3COxyn03TYlFax6w==}
     engines: {node: '>=10'}
-
-  sister@3.0.2:
-    resolution: {integrity: sha512-p19rtTs+NksBRKW9qn0UhZ8/TUI9BPw9lmtHny+Y3TinWlOa9jWh9xB0AtPSdmOy49NJJJSSe0Ey4C7h0TrcYA==}
 
   slice-ansi@3.0.0:
     resolution: {integrity: sha512-pSyv7bSTC7ig9Dcgbw9AuRNUb5k5V6oDudjZoMBSr13qpLBG7tB+zgCkARjq7xIUgdz5P1Qe8u+rSGdouOOIyQ==}
@@ -4166,9 +4140,6 @@ packages:
   yoctocolors@2.1.1:
     resolution: {integrity: sha512-GQHQqAopRhwU8Kt1DDM8NjibDXHC8eoh1erhGAJPEyveY9qqVeXvVikNKrDz69sHowPMorbPUrH/mx8c50eiBQ==}
     engines: {node: '>=18'}
-
-  youtube-player@5.5.2:
-    resolution: {integrity: sha512-ZGtsemSpXnDky2AUYWgxjaopgB+shFHgXVpiJFeNB5nWEugpW1KWYDaHKuLqh2b67r24GtP6HoSW5swvf0fFIQ==}
 
   yt-search@2.13.1:
     resolution: {integrity: sha512-iUvUpUYyG1Gk5MxwdxUkSeugXR2DcWX+pEq3rJlsNHHNp4+Lka+fCwNYEdoN5ovxltAzAvx0K3/3MbX7FqDdAw==}
@@ -6912,10 +6883,6 @@ snapshots:
 
   date-fns@4.1.0: {}
 
-  debug@2.6.9:
-    dependencies:
-      ms: 2.0.0
-
   debug@4.3.7:
     dependencies:
       ms: 2.1.3
@@ -8117,8 +8084,6 @@ snapshots:
       prelude-ls: 1.2.1
       type-check: 0.4.0
 
-  load-script@1.0.0: {}
-
   locate-path@6.0.0:
     dependencies:
       p-locate: 5.0.0
@@ -8303,8 +8268,6 @@ snapshots:
       yallist: 4.0.0
 
   mkdirp@1.0.4: {}
-
-  ms@2.0.0: {}
 
   ms@2.1.3: {}
 
@@ -8649,15 +8612,6 @@ snapshots:
       react: 19.1.0
       react-dom: 19.1.0(react@19.1.0)
 
-  react-youtube@10.1.0(react@19.1.0):
-    dependencies:
-      fast-deep-equal: 3.1.3
-      prop-types: 15.8.1
-      react: 19.1.0
-      youtube-player: 5.5.2
-    transitivePeerDependencies:
-      - supports-color
-
   react@19.1.0: {}
 
   read-binary-file-arch@1.0.6:
@@ -8938,8 +8892,6 @@ snapshots:
   simple-update-notifier@2.0.0:
     dependencies:
       semver: 7.7.1
-
-  sister@3.0.2: {}
 
   slice-ansi@3.0.0:
     dependencies:
@@ -9410,14 +9362,6 @@ snapshots:
   yocto-queue@0.1.0: {}
 
   yoctocolors@2.1.1: {}
-
-  youtube-player@5.5.2:
-    dependencies:
-      debug: 2.6.9
-      load-script: 1.0.0
-      sister: 3.0.2
-    transitivePeerDependencies:
-      - supports-color
 
   yt-search@2.13.1:
     dependencies:
