@@ -33,6 +33,7 @@ import {
   BroomRegular as UninstallIcon
 } from '@fluentui/react-icons'
 import placeholderImage from '../assets/images/game-placeholder.png'
+import youtubeLogo from '../assets/images/youtube-logo.svg'
 import YouTube from 'react-youtube'
 import { useGames } from '@renderer/hooks/useGames'
 
@@ -126,6 +127,43 @@ const useStyles = makeStyles({
     width: '100%',
     paddingTop: '56.25%', // 16:9 aspect ratio
     marginTop: tokens.spacingVerticalM
+  },
+  youtubeFallback: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: '100%',
+    height: '100%',
+    display: 'grid',
+    placeItems: 'center',
+    backgroundColor: tokens.colorNeutralBackground2,
+    borderRadius: tokens.borderRadiusMedium,
+    overflow: 'hidden',
+    textAlign: 'center'
+  },
+  youtubeFallbackContent: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: tokens.spacingVerticalS,
+    padding: tokens.spacingVerticalM
+  },
+  youtubeFallbackThumb: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover',
+    position: 'absolute',
+    inset: 0,
+    filter: 'brightness(0.45)'
+  },
+  youtubeFallbackLogo: {
+    width: '120px',
+    height: 'auto',
+    marginBottom: tokens.spacingVerticalS
+  },
+  youtubeFallbackOverlay: {
+    position: 'relative',
+    zIndex: 1
   },
   youtubePlayer: {
     position: 'absolute',
@@ -552,17 +590,36 @@ const GameDetailsDialog: React.FC<GameDetailsDialogProps> = ({
                 {loadingVideo ? (
                   <Spinner size="tiny" label="Searching for trailer..." />
                 ) : videoError && videoId ? (
-                  <Text>
-                    Trailer unavailable in-app.{' '}
-                    <a
-                      href={`https://www.youtube.com/watch?v=${videoId}`}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      Open on YouTube
-                    </a>
-                    .
-                  </Text>
+                  <div className={styles.youtubeContainer}>
+                    <div className={styles.youtubeFallback}>
+                      <img
+                        className={styles.youtubeFallbackThumb}
+                        src={`https://img.youtube.com/vi/${videoId}/hqdefault.jpg`}
+                        alt="Trailer thumbnail"
+                      />
+                      <div className={styles.youtubeFallbackOverlay}>
+                        <div className={styles.youtubeFallbackContent}>
+                          <img
+                            className={styles.youtubeFallbackLogo}
+                            src={youtubeLogo}
+                            alt="YouTube"
+                          />
+                          <Text weight="semibold">Trailer can’t play in-app</Text>
+                          <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
+                            Some videos block embeds. Open it on YouTube instead.
+                          </Text>
+                          <Button
+                            appearance="primary"
+                            onClick={() =>
+                              window.open(`https://www.youtube.com/watch?v=${videoId}`, '_blank')
+                            }
+                          >
+                            Open on YouTube
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 ) : videoId ? (
                   <div className={styles.youtubeContainer}>
                     <YouTube
