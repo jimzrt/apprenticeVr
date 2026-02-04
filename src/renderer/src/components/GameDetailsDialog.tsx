@@ -33,6 +33,7 @@ import {
   BroomRegular as UninstallIcon
 } from '@fluentui/react-icons'
 import placeholderImage from '../assets/images/game-placeholder.png'
+import youtubeLogo from '../assets/images/youtube-logo.svg'
 import YouTube from 'react-youtube'
 import { useGames } from '@renderer/hooks/useGames'
 
@@ -127,6 +128,43 @@ const useStyles = makeStyles({
     paddingTop: '56.25%', // 16:9 aspect ratio
     marginTop: tokens.spacingVerticalM
   },
+  youtubeFallback: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: '100%',
+    height: '100%',
+    display: 'grid',
+    placeItems: 'center',
+    backgroundColor: tokens.colorNeutralBackground2,
+    borderRadius: tokens.borderRadiusMedium,
+    overflow: 'hidden',
+    textAlign: 'center'
+  },
+  youtubeFallbackContent: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: tokens.spacingVerticalS,
+    padding: tokens.spacingVerticalM
+  },
+  youtubeFallbackThumb: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover',
+    position: 'absolute',
+    inset: 0,
+    filter: 'brightness(0.45)'
+  },
+  youtubeFallbackLogo: {
+    width: '120px',
+    height: 'auto',
+    marginBottom: tokens.spacingVerticalS
+  },
+  youtubeFallbackOverlay: {
+    position: 'relative',
+    zIndex: 1
+  },
   youtubePlayer: {
     position: 'absolute',
     top: 0,
@@ -187,6 +225,7 @@ const GameDetailsDialog: React.FC<GameDetailsDialogProps> = ({
   const [loadingNote, setLoadingNote] = useState<boolean>(false)
   const [videoId, setVideoId] = useState<string | null>(null)
   const [loadingVideo, setLoadingVideo] = useState<boolean>(false)
+  const [videoError, setVideoError] = useState<boolean>(false)
 
   // Fetch note when dialog opens or game changes
   useEffect(() => {
@@ -228,6 +267,7 @@ const GameDetailsDialog: React.FC<GameDetailsDialogProps> = ({
 
       setLoadingVideo(true)
       setVideoId(null)
+      setVideoError(false)
 
       try {
         const videoId = await getTrailerVideoIdFromContext(game.name)
@@ -252,6 +292,15 @@ const GameDetailsDialog: React.FC<GameDetailsDialogProps> = ({
       isMounted = false
     }
   }, [open, game, getTrailerVideoIdFromContext])
+
+  const getYouTubeOrigin = (): string | undefined => {
+    if (typeof window === 'undefined') return undefined
+    const origin = window.location.origin
+    if (origin === 'null' || origin.startsWith('file:')) {
+      return 'http://localhost'
+    }
+    return origin
+  }
 
   // Helper function to render action buttons based on game state
   const renderActionButtons = (currentGame: GameInfo): React.ReactNode => {
@@ -540,6 +589,37 @@ const GameDetailsDialog: React.FC<GameDetailsDialogProps> = ({
                 </div>
                 {loadingVideo ? (
                   <Spinner size="tiny" label="Searching for trailer..." />
+                ) : videoError && videoId ? (
+                  <div className={styles.youtubeContainer}>
+                    <div className={styles.youtubeFallback}>
+                      <img
+                        className={styles.youtubeFallbackThumb}
+                        src={`https://img.youtube.com/vi/${videoId}/hqdefault.jpg`}
+                        alt="Trailer thumbnail"
+                      />
+                      <div className={styles.youtubeFallbackOverlay}>
+                        <div className={styles.youtubeFallbackContent}>
+                          <img
+                            className={styles.youtubeFallbackLogo}
+                            src={youtubeLogo}
+                            alt="YouTube"
+                          />
+                          <Text weight="semibold">Trailer can’t play in-app</Text>
+                          <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
+                            Some videos block embeds. Open it on YouTube instead.
+                          </Text>
+                          <Button
+                            appearance="primary"
+                            onClick={() =>
+                              window.open(`https://www.youtube.com/watch?v=${videoId}`, '_blank')
+                            }
+                          >
+                            Open on YouTube
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 ) : videoId ? (
                   <div className={styles.youtubeContainer}>
                     <YouTube
@@ -548,9 +628,14 @@ const GameDetailsDialog: React.FC<GameDetailsDialogProps> = ({
                       opts={{
                         width: '100%',
                         height: '100%',
+                        host: 'https://www.youtube.com',
                         playerVars: {
-                          autoplay: 0
+                          autoplay: 0,
+                          origin: getYouTubeOrigin()
                         }
+                      }}
+                      onError={() => {
+                        setVideoError(true)
                       }}
                     />
                   </div>

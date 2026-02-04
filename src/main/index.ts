@@ -1,5 +1,6 @@
 import { app, shell, BrowserWindow, protocol, dialog, ipcMain } from 'electron'
-import { join } from 'path'
+import { join, normalize, extname, sep } from 'path'
+import { createServer, Server } from 'http'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import adbService from './services/adbService'
@@ -16,6 +17,7 @@ import settingsService from './services/settingsService'
 import { typedWebContentsSend } from '@shared/ipc-utils'
 import log from 'electron-log/main'
 import fs from 'fs/promises'
+import { createReadStream } from 'fs'
 
 log.transports.file.resolvePathFn = () => {
   return logsService.getLogFilePath()
@@ -30,6 +32,110 @@ Object.assign(console, log.functions)
 app.commandLine.appendSwitch('gtk-version', '3')
 
 let mainWindow: BrowserWindow | null = null
+let rendererServer: { url: string; close: () => Promise<void> } | null = null
+
+const getMimeType = (filePath: string): string => {
+  const ext = extname(filePath).toLowerCase()
+  switch (ext) {
+    case '.html':
+      return 'text/html'
+    case '.js':
+      return 'text/javascript'
+    case '.css':
+      return 'text/css'
+    case '.json':
+      return 'application/json'
+    case '.svg':
+      return 'image/svg+xml'
+    case '.png':
+      return 'image/png'
+    case '.jpg':
+    case '.jpeg':
+      return 'image/jpeg'
+    case '.webp':
+      return 'image/webp'
+    case '.gif':
+      return 'image/gif'
+    case '.wasm':
+      return 'application/wasm'
+    default:
+      return 'application/octet-stream'
+  }
+}
+
+const startRendererServer = async (rootDir: string): Promise<{ url: string; close: () => Promise<void> }> => {
+  const normalizedRoot = normalize(rootDir)
+
+  return await new Promise((resolve, reject) => {
+    const server: Server = createServer(async (req, res) => {
+      try {
+        if (!req.url) {
+          res.statusCode = 400
+          res.end('Bad Request')
+          return
+        }
+
+        const requestUrl = new URL(req.url, 'http://127.0.0.1')
+        let pathname = decodeURIComponent(requestUrl.pathname)
+
+        if (pathname === '/') {
+          pathname = '/index.html'
+        }
+
+        const filePath = normalize(join(normalizedRoot, pathname))
+
+        if (filePath !== normalizedRoot && !filePath.startsWith(normalizedRoot + sep)) {
+          res.statusCode = 403
+          res.end('Forbidden')
+          return
+        }
+
+        const stat = await fs.stat(filePath)
+        if (stat.isDirectory()) {
+          res.statusCode = 404
+          res.end('Not Found')
+          return
+        }
+
+        res.setHeader('Content-Type', getMimeType(filePath))
+        res.setHeader('Cache-Control', 'no-cache')
+
+        const stream = createReadStream(filePath)
+        stream.on('error', (error) => {
+          console.error('[RendererServer] Stream error:', error)
+          if (!res.headersSent) {
+            res.statusCode = 500
+          }
+          res.end('Server Error')
+        })
+        stream.pipe(res)
+      } catch {
+        res.statusCode = 404
+        res.end('Not Found')
+      }
+    })
+
+    server.on('error', (error) => {
+      reject(error)
+    })
+
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address()
+      if (!address || typeof address === 'string') {
+        reject(new Error('Failed to bind renderer server'))
+        return
+      }
+      const url = `http://127.0.0.1:${address.port}`
+      resolve({
+        url,
+        close: () =>
+          new Promise<void>((closeResolve) => {
+            server.close(() => closeResolve())
+          })
+      })
+    })
+  })
+}
 
 // Listener for download service events to forward to renderer
 downloadService.on('installation:success', (deviceId) => {
@@ -52,11 +158,11 @@ function sendDependencyProgress(
   }
 }
 
-function createWindow(): void {
+async function createWindow(): Promise<void> {
   // Create the browser window.
   mainWindow = new BrowserWindow({
-    width: 1200,
-    minWidth: 1200,
+    width: 1250,
+    minWidth: 1250,
     height: 900,
     show: false,
     autoHideMenuBar: true,
@@ -70,7 +176,7 @@ function createWindow(): void {
   })
 
   // Explicitly set minimum size to ensure constraint is enforced
-  mainWindow.setMinimumSize(1200, 900)
+  mainWindow.setMinimumSize(1250, 900)
 
   mainWindow.on('ready-to-show', async () => {
     if (mainWindow) {
@@ -172,7 +278,11 @@ function createWindow(): void {
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
-    mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+    if (!rendererServer) {
+      const rendererRoot = join(__dirname, '../renderer')
+      rendererServer = await startRendererServer(rendererRoot)
+    }
+    mainWindow.loadURL(rendererServer.url)
   }
 }
 
@@ -613,6 +723,7 @@ app.whenReady().then(async () => {
     return await downloadService.copyObbFolder(folderPath, deviceId)
   })
 
+
   // Validate that all IPC channels have handlers registered
   const allHandled = typedIpcMain.validateAllHandlersRegistered()
   if (!allHandled) {
@@ -622,7 +733,7 @@ app.whenReady().then(async () => {
   }
 
   // Create window FIRST
-  createWindow()
+  await createWindow()
 
   app.on('activate', function () {
     // On macOS it's common to re-create a window in the app when the
@@ -644,6 +755,12 @@ app.on('window-all-closed', () => {
 // Clean up ADB tracking when app is quitting
 app.on('will-quit', () => {
   adbService.stopTrackingDevices()
+  if (rendererServer) {
+    rendererServer.close().catch((error) => {
+      console.warn('Failed to close renderer server:', error)
+    })
+    rendererServer = null
+  }
 })
 
 // In this file you can include the rest of your app's specific main process
