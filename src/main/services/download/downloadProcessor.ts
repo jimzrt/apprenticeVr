@@ -274,7 +274,11 @@ export class DownloadProcessor {
       downloadPath,
       '--http-url',
       this.vrpConfig.baseUri,
-      '--no-check-certificate'
+      '--no-check-certificate',
+      '--progress',
+      '--stats',
+      '1s',
+      '--stats-one-line'
     ]
 
     const rcloneLogTail: string[] = []
@@ -288,13 +292,35 @@ export class DownloadProcessor {
       }
     }
 
+    let lastProgress = -1
     const handleRcloneOutput = (chunk: Buffer): void => {
-      const text = chunk.toString()
-      const lines = text.split(/\r?\n/)
+      const text = chunk.toString().replace(/\r/g, '\n')
+      const lines = text.split(/\n/)
       for (const line of lines) {
         if (line) {
           console.log(`[DownProc][rclone] ${line}`)
           pushLogLine(line)
+
+          const progressMatch =
+            line.match(/Transferred:.*?(\d+)%/) || line.match(/,\s*(\d+)%\s*,/)
+          if (progressMatch && progressMatch[1]) {
+            const progress = Number(progressMatch[1])
+            if (!Number.isNaN(progress) && progress !== lastProgress) {
+              lastProgress = progress
+
+              const speedMatch = line.match(/,\s*([0-9.]+\s*\w+\/s)(?:,|$)/)
+              const etaMatch = line.match(/ETA\s+([0-9hms:]+|[-]+)\b/i)
+
+              this.updateItemStatus(
+                item.releaseName,
+                'Downloading',
+                progress,
+                undefined,
+                speedMatch?.[1],
+                etaMatch?.[1]
+              )
+            }
+          }
         }
       }
     }
