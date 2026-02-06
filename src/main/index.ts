@@ -161,8 +161,8 @@ function sendDependencyProgress(
 async function createWindow(): Promise<void> {
   // Create the browser window.
   mainWindow = new BrowserWindow({
-    width: 1200,
-    minWidth: 1200,
+    width: 1250,
+    minWidth: 1250,
     height: 900,
     show: false,
     autoHideMenuBar: true,
@@ -176,7 +176,7 @@ async function createWindow(): Promise<void> {
   })
 
   // Explicitly set minimum size to ensure constraint is enforced
-  mainWindow.setMinimumSize(1200, 900)
+  mainWindow.setMinimumSize(1250, 900)
 
   mainWindow.on('ready-to-show', async () => {
     if (mainWindow) {
@@ -722,6 +722,7 @@ app.whenReady().then(async () => {
     console.log(`[IPC] OBB folder copy requested for ${folderPath} on device ${deviceId}`)
     return await downloadService.copyObbFolder(folderPath, deviceId)
   })
+
 
   // Validate that all IPC channels have handlers registered
   const allHandled = typedIpcMain.validateAllHandlersRegistered()

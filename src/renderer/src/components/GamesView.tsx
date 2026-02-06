@@ -41,12 +41,16 @@ import {
   DialogContent,
   DialogActions
 } from '@fluentui/react-components'
+import { Tooltip } from '@fluentui/react-components'
 import {
   ArrowClockwiseRegular,
   DismissRegular,
   PlugDisconnectedRegular,
   CheckmarkCircleRegular,
   DesktopRegular,
+  Star16Filled,
+  Star16Regular,
+  StarHalf16Filled,
   BatteryChargeRegular,
   StorageRegular,
   PersonRegular,
@@ -81,7 +85,7 @@ const FIXED_COLUMNS_WIDTH =
   COLUMN_WIDTHS.SIZE +
   COLUMN_WIDTHS.LAST_UPDATED
 
-type FilterType = 'all' | 'installed' | 'update'
+type FilterType = 'all' | 'installed' | 'downloaded' | 'update'
 
 const filterGameNameAndPackage: FilterFn<GameInfo> = (row, _columnId, filterValue) => {
   const searchStr = String(filterValue).toLowerCase()
@@ -92,6 +96,46 @@ const filterGameNameAndPackage: FilterFn<GameInfo> = (row, _columnId, filterValu
     gameName.includes(searchStr) ||
     packageName.includes(searchStr) ||
     releaseName.includes(searchStr)
+  )
+}
+
+const booleanEqualsFilter: FilterFn<GameInfo> = (row, columnId, filterValue) => {
+  if (filterValue === undefined) return true
+  return row.getValue(columnId) === filterValue
+}
+
+const renderPopularityStars = (value: number): React.ReactNode => {
+  const normalized = Math.max(0, Math.min(100, value))
+  const rating = (normalized / 100) * 5
+  const filledCount = Math.floor(rating)
+  const hasHalf = rating - filledCount >= 0.5
+
+  return (
+    <div style={{ display: 'inline-flex', gap: '2px' }} aria-label={`Popularity ${value}`}>
+      {Array.from({ length: 5 }).map((_, index) => {
+        if (index < filledCount) {
+          return (
+            <Star16Filled
+              key={index}
+              fontSize={16}
+              color={tokens.colorPaletteYellowForeground2}
+            />
+          )
+        }
+        if (index === filledCount && hasHalf) {
+          return (
+            <StarHalf16Filled
+              key={index}
+              fontSize={16}
+              color={tokens.colorPaletteYellowForeground2}
+            />
+          )
+        }
+        return (
+          <Star16Regular key={index} fontSize={16} color={tokens.colorNeutralForeground3} />
+        )
+      })}
+    </div>
   )
 }
 
@@ -282,19 +326,46 @@ const GamesView: React.FC<GamesViewProps> = ({ onBackToDevices }) => {
   const [showObbConfirmDialog, setShowObbConfirmDialog] = useState<boolean>(false)
   const [obbFolderToConfirm, setObbFolderToConfirm] = useState<string | null>(null)
 
+  const downloadStatusMap = useMemo(() => {
+    const map = new Map<string, { status: string; progress: number }>()
+    downloadQueue.forEach((item) => {
+      if (item.releaseName) {
+        const progress =
+          item.status === 'Extracting' ? (item.extractProgress ?? 0) : (item.progress ?? 0)
+        map.set(item.releaseName, {
+          status: item.status,
+          progress: progress
+        })
+      }
+    })
+    return map
+  }, [downloadQueue])
+
   const counts = useMemo(() => {
     const total = games.length
     const installed = games.filter((g) => g.isInstalled).length
     const updates = games.filter((g) => g.hasUpdate).length
-    return { total, installed, updates }
-  }, [games])
+    const downloaded = games.filter((g) => {
+      if (!g.releaseName || g.isInstalled) return false
+      return downloadStatusMap.get(g.releaseName)?.status === 'Completed'
+    }).length
+    return { total, installed, downloaded, updates }
+  }, [games, downloadStatusMap])
 
   useEffect(() => {
     setColumnFilters((prev) => {
-      const otherFilters = prev.filter((f) => f.id !== 'isInstalled' && f.id !== 'hasUpdate')
+      const otherFilters = prev.filter(
+        (f) => f.id !== 'isInstalled' && f.id !== 'hasUpdate' && f.id !== 'isDownloaded'
+      )
       switch (activeFilter) {
         case 'installed':
           return [...otherFilters, { id: 'isInstalled', value: true }]
+        case 'downloaded':
+          return [
+            ...otherFilters,
+            { id: 'isDownloaded', value: true },
+            { id: 'isInstalled', value: false }
+          ]
         case 'update':
           return [
             ...otherFilters,
@@ -327,21 +398,6 @@ const GamesView: React.FC<GamesViewProps> = ({ onBackToDevices }) => {
       unsubscribe()
     }
   }, [selectedDevice, loadPackages, games])
-
-  const downloadStatusMap = useMemo(() => {
-    const map = new Map<string, { status: string; progress: number }>()
-    downloadQueue.forEach((item) => {
-      if (item.releaseName) {
-        const progress =
-          item.status === 'Extracting' ? (item.extractProgress ?? 0) : (item.progress ?? 0)
-        map.set(item.releaseName, {
-          status: item.status,
-          progress: progress
-        })
-      }
-    })
-    return map
-  }, [downloadQueue])
 
   useEffect(() => {
     if (!tableContainerRef.current) return
@@ -407,18 +463,26 @@ const GamesView: React.FC<GamesViewProps> = ({ onBackToDevices }) => {
             <div className={styles.statusIconCell}>
               <div style={{ display: 'flex', gap: tokens.spacingHorizontalXXS }}>
                 {isDownloaded && (
-                  <DesktopRegular
-                    fontSize={16}
-                    color={tokens.colorNeutralForeground3}
-                    aria-label="Installed"
-                  />
+                  <Tooltip content="Stored Locally" relationship="label">
+                    <span>
+                      <DesktopRegular
+                        fontSize={16}
+                        color={tokens.colorNeutralForeground3}
+                        aria-label="Stored Locally"
+                      />
+                    </span>
+                  </Tooltip>
                 )}
                 {isInstalled && (
-                  <CheckmarkCircleRegular
-                    fontSize={16}
-                    color={tokens.colorPaletteGreenForeground1}
-                    aria-label="Downloaded"
-                  />
+                  <Tooltip content="Installed" relationship="label">
+                    <span>
+                      <CheckmarkCircleRegular
+                        fontSize={16}
+                        color={tokens.colorPaletteGreenForeground1}
+                        aria-label="Installed"
+                      />
+                    </span>
+                  </Tooltip>
                 )}
                 {isUpdateAvailable && (
                   <ArrowClockwiseRegular
@@ -555,7 +619,7 @@ const GamesView: React.FC<GamesViewProps> = ({ onBackToDevices }) => {
         size: COLUMN_WIDTHS.POPULARITY,
         cell: (info) => {
           const count = info.getValue()
-          return typeof count === 'number' ? count.toLocaleString() : '-'
+          return typeof count === 'number' ? renderPopularityStars(count) : '-'
         },
         enableResizing: true
       },
@@ -576,12 +640,24 @@ const GamesView: React.FC<GamesViewProps> = ({ onBackToDevices }) => {
       {
         accessorKey: 'isInstalled',
         header: 'Installed Status',
-        enableResizing: false
+        enableResizing: false,
+        filterFn: 'booleanEquals'
       },
       {
         accessorKey: 'hasUpdate',
         header: 'Update Status',
-        enableResizing: false
+        enableResizing: false,
+        filterFn: 'booleanEquals'
+      },
+      {
+        id: 'isDownloaded',
+        header: 'Downloaded Status',
+        accessorFn: (row) => {
+          if (!row.releaseName) return false
+          return downloadStatusMap.get(row.releaseName)?.status === 'Completed'
+        },
+        enableResizing: false,
+        filterFn: 'booleanEquals'
       }
     ]
   }, [downloadStatusMap, styles, tableWidth])
@@ -591,13 +667,14 @@ const GamesView: React.FC<GamesViewProps> = ({ onBackToDevices }) => {
     columns,
     columnResizeMode: 'onChange',
     filterFns: {
-      gameNameAndPackageFilter: filterGameNameAndPackage
+      gameNameAndPackageFilter: filterGameNameAndPackage,
+      booleanEquals: booleanEqualsFilter
     },
     state: {
       sorting,
       globalFilter,
       columnFilters,
-      columnVisibility: { isInstalled: false, hasUpdate: false },
+      columnVisibility: { isInstalled: false, hasUpdate: false, isDownloaded: false },
       columnSizing
     },
     onSortingChange: setSorting,
@@ -1295,7 +1372,58 @@ const GamesView: React.FC<GamesViewProps> = ({ onBackToDevices }) => {
                   onClick={() => setActiveFilter('installed')}
                   className={activeFilter === 'installed' ? 'active' : ''}
                 >
-                  Installed ({counts.installed})
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    <Tooltip content="Installed" relationship="label">
+                      <span>
+                        <CheckmarkCircleRegular
+                          fontSize={16}
+                          color={
+                            activeFilter === 'installed'
+                              ? tokens.colorPaletteGreenForeground1
+                              : tokens.colorNeutralForeground3
+                          }
+                          aria-label="Installed"
+                        />
+                      </span>
+                    </Tooltip>
+                    Installed ({counts.installed})
+                  </span>
+                </button>
+                <button
+                  onClick={() => setActiveFilter('downloaded')}
+                  className={activeFilter === 'downloaded' ? 'active' : ''}
+                  disabled={counts.downloaded === 0}
+                >
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    <Tooltip content="Stored Locally" relationship="label">
+                      <span>
+                        <DesktopRegular
+                          fontSize={16}
+                          color={
+                            activeFilter === 'downloaded'
+                              ? tokens.colorNeutralForeground2
+                              : tokens.colorNeutralForeground3
+                          }
+                          aria-label="Stored Locally"
+                        />
+                      </span>
+                    </Tooltip>
+                    Ready to Install ({counts.downloaded})
+                  </span>
                 </button>
                 <button
                   onClick={() => setActiveFilter('update')}

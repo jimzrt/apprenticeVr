@@ -41,6 +41,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
   margin-bottom: 8px;
   padding-bottom: 8px;
   border-bottom: 1px solid #e0e0e0;
@@ -51,11 +52,17 @@
   display: flex;
   align-items: center;
   gap: 16px;
+  flex-wrap: nowrap;
+}
+
+.games-toolbar-left button {
+  white-space: nowrap;
 }
 
 .last-synced {
   color: var(--colorNeutralForeground2);
   font-size: 0.9em;
+  white-space: nowrap;
 }
 
 .game-count {
@@ -270,15 +277,20 @@
   display: flex;
   gap: 8px;
   margin-left: 16px;
+  flex-wrap: nowrap;
 }
 
 .filter-buttons button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 4px 10px;
   font-size: 0.85em;
   background-color: #f8f9fa;
   border: 1px solid #dadce0;
   border-radius: 12px; /* More rounded */
   cursor: pointer;
+  white-space: nowrap;
   transition:
     background-color 0.2s,
     border-color 0.2s,
