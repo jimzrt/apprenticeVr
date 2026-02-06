@@ -187,6 +187,7 @@ const GameDetailsDialog: React.FC<GameDetailsDialogProps> = ({
   const [loadingNote, setLoadingNote] = useState<boolean>(false)
   const [videoId, setVideoId] = useState<string | null>(null)
   const [loadingVideo, setLoadingVideo] = useState<boolean>(false)
+  const [videoError, setVideoError] = useState<boolean>(false)
 
   // Fetch note when dialog opens or game changes
   useEffect(() => {
@@ -228,6 +229,7 @@ const GameDetailsDialog: React.FC<GameDetailsDialogProps> = ({
 
       setLoadingVideo(true)
       setVideoId(null)
+      setVideoError(false)
 
       try {
         const videoId = await getTrailerVideoIdFromContext(game.name)
@@ -252,6 +254,15 @@ const GameDetailsDialog: React.FC<GameDetailsDialogProps> = ({
       isMounted = false
     }
   }, [open, game, getTrailerVideoIdFromContext])
+
+  const getYouTubeOrigin = (): string | undefined => {
+    if (typeof window === 'undefined') return undefined
+    const origin = window.location.origin
+    if (origin === 'null' || origin.startsWith('file:')) {
+      return 'http://localhost'
+    }
+    return origin
+  }
 
   // Helper function to render action buttons based on game state
   const renderActionButtons = (currentGame: GameInfo): React.ReactNode => {
@@ -540,6 +551,18 @@ const GameDetailsDialog: React.FC<GameDetailsDialogProps> = ({
                 </div>
                 {loadingVideo ? (
                   <Spinner size="tiny" label="Searching for trailer..." />
+                ) : videoError && videoId ? (
+                  <Text>
+                    Trailer unavailable in-app.{' '}
+                    <a
+                      href={`https://www.youtube.com/watch?v=${videoId}`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Open on YouTube
+                    </a>
+                    .
+                  </Text>
                 ) : videoId ? (
                   <div className={styles.youtubeContainer}>
                     <YouTube
@@ -548,9 +571,14 @@ const GameDetailsDialog: React.FC<GameDetailsDialogProps> = ({
                       opts={{
                         width: '100%',
                         height: '100%',
+                        host: 'https://www.youtube.com',
                         playerVars: {
-                          autoplay: 0
+                          autoplay: 0,
+                          origin: getYouTubeOrigin()
                         }
+                      }}
+                      onError={() => {
+                        setVideoError(true)
                       }}
                     />
                   </div>

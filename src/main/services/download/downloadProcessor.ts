@@ -211,6 +211,12 @@ export class DownloadProcessor {
             remoteName
           })
         } catch (mirrorError: unknown) {
+          if (this.isFuseMissingError(mirrorError)) {
+            console.warn(
+              `[DownProc] FUSE not available. Falling back to public endpoint direct download for ${item.releaseName}.`
+            )
+            return await this.startPublicEndpointDownload(item)
+          }
           console.error(
             `[DownProc] Mirror mount-based download failed for ${item.releaseName}, falling back to public endpoint:`,
             mirrorError
@@ -222,7 +228,162 @@ export class DownloadProcessor {
 
     // Fall back to public endpoint using mount-based download (rclone mount + aria2c)
     console.log(`[DownProc] Using mount-based download for public endpoint: ${item.releaseName}`)
-    return await this.startMountBasedDownload(item)
+    try {
+      return await this.startMountBasedDownload(item)
+    } catch (error: unknown) {
+      if (this.isFuseMissingError(error)) {
+        console.warn(
+          `[DownProc] FUSE not available. Falling back to public endpoint direct download for ${item.releaseName}.`
+        )
+        return await this.startPublicEndpointDownload(item)
+      }
+      throw error
+    }
+  }
+
+  private async startPublicEndpointDownload(
+    item: DownloadItem
+  ): Promise<{ success: boolean; startExtraction: boolean; finalState?: DownloadItem }> {
+    console.log(`[DownProc] Using public endpoint for ${item.releaseName}`)
+
+    if (!this.vrpConfig?.baseUri || !this.vrpConfig?.password) {
+      console.error('[DownProc] Missing VRP baseUri or password.')
+      this.updateItemStatus(item.releaseName, 'Error', 0, 'Missing VRP configuration')
+      return { success: false, startExtraction: false }
+    }
+
+    const rclonePath = dependencyService.getRclonePath()
+    if (!rclonePath) {
+      console.error('[DownProc] Rclone path not found.')
+      this.updateItemStatus(item.releaseName, 'Error', 0, 'Rclone dependency not found')
+      return { success: false, startExtraction: false }
+    }
+
+    const downloadPath = join(item.downloadPath, item.releaseName)
+    this.queueManager.updateItem(item.releaseName, { downloadPath: downloadPath })
+
+    const gameNameHash = crypto
+      .createHash('md5')
+      .update(item.releaseName + '\n')
+      .digest('hex')
+    const source = `:http:/${gameNameHash}`
+
+    const rcloneArgs = [
+      'copy',
+      source,
+      downloadPath,
+      '--http-url',
+      this.vrpConfig.baseUri,
+      '--no-check-certificate'
+    ]
+
+    const rcloneLogTail: string[] = []
+    const maxLogLines = 50
+    const pushLogLine = (line: string): void => {
+      const trimmed = line.replace(/\r?\n$/, '')
+      if (!trimmed) return
+      rcloneLogTail.push(trimmed)
+      if (rcloneLogTail.length > maxLogLines) {
+        rcloneLogTail.shift()
+      }
+    }
+
+    const handleRcloneOutput = (chunk: Buffer): void => {
+      const text = chunk.toString()
+      const lines = text.split(/\r?\n/)
+      for (const line of lines) {
+        if (line) {
+          console.log(`[DownProc][rclone] ${line}`)
+          pushLogLine(line)
+        }
+      }
+    }
+
+    try {
+      this.updateItemStatus(item.releaseName, 'Downloading', 0)
+
+      const rcloneProcess = execa(rclonePath, rcloneArgs, {
+        all: true,
+        buffer: false,
+        windowsHide: true
+      })
+
+      if (rcloneProcess.all) {
+        rcloneProcess.all.on('data', handleRcloneOutput)
+      }
+
+      this.activeDownloads.set(item.releaseName, {
+        cancel: () => {
+          rcloneProcess.kill('SIGTERM')
+        },
+        mountProcess: rcloneProcess
+      })
+
+      console.log(
+        `[DownProc] rclone process started for ${item.releaseName} with PID: ${rcloneProcess.pid}`
+      )
+
+      await rcloneProcess
+
+      this.activeDownloads.delete(item.releaseName)
+      this.queueManager.updateItem(item.releaseName, { pid: undefined })
+
+      this.updateItemStatus(item.releaseName, 'Downloading', 100)
+      console.log(
+        `[DownProc] rclone process finished successfully for ${item.releaseName}.`
+      )
+
+      return {
+        success: true,
+        startExtraction: true,
+        finalState: this.queueManager.findItem(item.releaseName)
+      }
+    } catch (error: unknown) {
+      const isExecaError = (err: unknown): err is ExecaError =>
+        typeof err === 'object' && err !== null && 'shortMessage' in err
+      const currentItemState = this.queueManager.findItem(item.releaseName)
+      const statusBeforeCatch = currentItemState?.status ?? 'Unknown'
+
+      console.error(`[DownProc] rclone download error for ${item.releaseName}:`, error)
+      if (rcloneLogTail.length > 0) {
+        console.error(`[DownProc] rclone log tail:\n${rcloneLogTail.join('\n')}`)
+      }
+
+      if (this.activeDownloads.has(item.releaseName)) {
+        this.activeDownloads.delete(item.releaseName)
+        this.queueManager.updateItem(item.releaseName, { pid: undefined })
+      }
+
+      if (isExecaError(error) && error.exitCode === 143) {
+        console.log(`[DownProc] rclone download cancelled for ${item.releaseName}`)
+        return { success: false, startExtraction: false, finalState: currentItemState }
+      }
+
+      let errorMessage = 'Public endpoint download failed.'
+      if (isExecaError(error)) {
+        errorMessage = error.shortMessage || error.message
+      } else if (error instanceof Error) {
+        errorMessage = error.message
+      } else {
+        errorMessage = String(error)
+      }
+      errorMessage = errorMessage.substring(0, 500)
+
+      if (statusBeforeCatch !== 'Cancelled' && statusBeforeCatch !== 'Error') {
+        this.updateItemStatus(
+          item.releaseName,
+          'Error',
+          currentItemState?.progress ?? 0,
+          errorMessage
+        )
+      }
+
+      return {
+        success: false,
+        startExtraction: false,
+        finalState: this.queueManager.findItem(item.releaseName)
+      }
+    }
   }
 
   // Mount-based download using rclone mount + rsync for better pause/resume
@@ -336,6 +497,44 @@ export class DownloadProcessor {
         windowsHide: true
       })
 
+      const mountLogTail: string[] = []
+      const maxLogLines = 50
+      const pushLogLine = (line: string): void => {
+        const trimmed = line.replace(/\r?\n$/, '')
+        if (!trimmed) return
+        mountLogTail.push(trimmed)
+        if (mountLogTail.length > maxLogLines) {
+          mountLogTail.shift()
+        }
+      }
+
+      const handleMountOutput = (chunk: Buffer): void => {
+        const text = chunk.toString()
+        const lines = text.split(/\r?\n/)
+        for (const line of lines) {
+          if (line) {
+            console.log(`[DownProc][rclone] ${line}`)
+            pushLogLine(line)
+          }
+        }
+      }
+
+      if (mountProcess.all) {
+        mountProcess.all.on('data', handleMountOutput)
+      }
+
+      let mountFailure: Error | null = null
+      mountProcess.catch((error) => {
+        mountFailure = error instanceof Error ? error : new Error(String(error))
+        console.error(
+          `[DownProc] rclone mount process failed for ${item.releaseName}:`,
+          error
+        )
+        if (mountLogTail.length > 0) {
+          console.error(`[DownProc] rclone mount log tail:\n${mountLogTail.join('\n')}`)
+        }
+      })
+
       // Store mount process for cleanup (we'll add it to the main download controller later)
       // Note: We'll remove this separate mount storage once we integrate it into the main controller
 
@@ -343,13 +542,35 @@ export class DownloadProcessor {
       let mountReady = false
       for (let i = 0; i < 10; i++) {
         await new Promise((resolve) => setTimeout(resolve, 1000))
+        if (mountFailure) {
+          const tail = mountLogTail.length > 0 ? `\n${mountLogTail.join('\n')}` : ''
+          const mountFailureMessage = String(mountFailure)
+          throw new Error(`rclone mount failed: ${mountFailureMessage}${tail}`)
+        }
+        if (mountProcess.exitCode !== null) {
+          const tail = mountLogTail.length > 0 ? `\n${mountLogTail.join('\n')}` : ''
+          throw new Error(`rclone mount exited early (code ${mountProcess.exitCode}).${tail}`)
+        }
         try {
           const testRead = await fs.readdir(mountPoint)
           if (testRead.length >= 0) {
-            // Even empty directory means mount is working
-            mountReady = true
-            console.log(`[DownProc] Mount ready after ${i + 1} seconds`)
-            break
+            let isMounted = true
+            if (process.platform !== 'win32') {
+              try {
+                const mountStat = await fsPromises.stat(mountPoint)
+                const parentStat = await fsPromises.stat(join(mountPoint, '..'))
+                isMounted = mountStat.dev !== parentStat.dev
+              } catch {
+                isMounted = false
+              }
+            }
+
+            if (isMounted) {
+              // Even empty directory means mount is working (remote may be empty).
+              mountReady = true
+              console.log(`[DownProc] Mount ready after ${i + 1} seconds`)
+              break
+            }
           }
         } catch {
           console.log(`[DownProc] Mount not ready yet, attempt ${i + 1}/10`)
@@ -357,7 +578,8 @@ export class DownloadProcessor {
       }
 
       if (!mountReady) {
-        throw new Error('Mount failed to become ready within 10 seconds')
+        const tail = mountLogTail.length > 0 ? `\n${mountLogTail.join('\n')}` : ''
+        throw new Error(`Mount failed to become ready within 10 seconds.${tail}`)
       }
 
       // Verify mount contents are accessible and download all files
@@ -550,6 +772,10 @@ export class DownloadProcessor {
         this.queueManager.updateItem(item.releaseName, { pid: undefined })
       }
 
+      if (this.isFuseMissingError(error)) {
+        throw error
+      }
+
       // Handle cancellation
       if (isExecaError(error) && error.exitCode === 143) {
         console.log(`[DownProc] Mount-based download cancelled for ${item.releaseName}`)
@@ -684,12 +910,27 @@ export class DownloadProcessor {
     this.updateItemStatus(item.releaseName, 'Downloading', item.progress ?? 0)
 
     // Restart the download using the stream-based approach
-    return await this.startMountBasedDownload(item)
+    try {
+      return await this.startMountBasedDownload(item)
+    } catch (error: unknown) {
+      if (this.isFuseMissingError(error)) {
+        console.warn(
+          `[DownProc] FUSE not available. Falling back to public endpoint direct download for ${item.releaseName}.`
+        )
+        return await this.startPublicEndpointDownload(item)
+      }
+      throw error
+    }
   }
 
   // Method to check if a download is active
   public isDownloadActive(releaseName: string): boolean {
     return this.activeDownloads.has(releaseName)
+  }
+
+  private isFuseMissingError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error)
+    return /cannot find FUSE/i.test(message) || /cgofuse/i.test(message)
   }
 
   // Helper method to get all files recursively from a directory
