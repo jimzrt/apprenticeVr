@@ -1,3 +1,15 @@
+# v1.3.7
+
+- Add persistent Local Library indexing with startup + scheduled rescans to track stored files across app restarts.
+- Improve update/reinstall behavior with automatic re-download fallback when local files are missing or outside the active download path.
+- Add `Download Only` and `Re-download` queue options with completed-item requeue support.
+- Prevent nested duplicate download folders by normalizing release paths during download/fallback flows.
+- Fix install pipeline to stop immediately on APK install failure (no OBB push after failed APK install).
+- Propagate real ADB install errors (e.g. `INSTALL_FAILED_*`) into queue state and show them as `Install Error` tooltips in list/dialog UI.
+- Add status-column icon toggles for filtering Installed / Stored Locally items, including excluded (red strike-through) state.
+- Improve sortable header indicators with Fluent sort-line icons for unsorted/asc/desc states.
+- Add stalled public-download watchdog handling to avoid queue hangs on zero-progress transfers.
+
 # v1.3.6
 
 - Fix download progress display for direct HTTP downloads by parsing rclone stats output.

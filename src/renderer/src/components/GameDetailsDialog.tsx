@@ -15,7 +15,8 @@ import {
   Badge,
   Divider,
   Spinner,
-  ProgressBar
+  ProgressBar,
+  Tooltip
 } from '@fluentui/react-components'
 import {
   ArrowClockwiseRegular,
@@ -188,8 +189,11 @@ interface GameDetailsDialogProps {
   game: GameInfo | null
   open: boolean
   onClose: () => void
-  downloadStatusMap: Map<string, { status: string; progress: number }>
+  downloadStatusMap: Map<string, { status: string; progress: number; error?: string }>
+  isStoredLocally: boolean
   onInstall: (game: GameInfo) => void
+  onDownloadOnly: (game: GameInfo) => void
+  onRedownload: (game: GameInfo) => void
   onUninstall: (game: GameInfo) => Promise<void>
   onReinstall: (game: GameInfo) => Promise<void>
   onUpdate: (game: GameInfo) => Promise<void>
@@ -207,7 +211,10 @@ const GameDetailsDialog: React.FC<GameDetailsDialogProps> = ({
   open,
   onClose,
   downloadStatusMap,
+  isStoredLocally,
   onInstall,
+  onDownloadOnly,
+  onRedownload,
   onUninstall,
   onReinstall,
   onUpdate,
@@ -226,6 +233,9 @@ const GameDetailsDialog: React.FC<GameDetailsDialogProps> = ({
   const [videoId, setVideoId] = useState<string | null>(null)
   const [loadingVideo, setLoadingVideo] = useState<boolean>(false)
   const [videoError, setVideoError] = useState<boolean>(false)
+  const statusInfo = game?.releaseName ? downloadStatusMap.get(game.releaseName) : undefined
+  const currentStatus = statusInfo?.status
+  const installErrorMessage = statusInfo?.error
 
   // Fetch note when dialog opens or game changes
   useEffect(() => {
@@ -306,7 +316,7 @@ const GameDetailsDialog: React.FC<GameDetailsDialogProps> = ({
   const renderActionButtons = (currentGame: GameInfo): React.ReactNode => {
     const status = downloadStatusMap.get(currentGame.releaseName || '')?.status
     const canCancel = status === 'Downloading' || status === 'Extracting' || status === 'Queued'
-    const isDownloaded = status === 'Completed'
+    const isDownloaded = isStoredLocally
     const isInstalled = currentGame.isInstalled
     const hasUpdate = currentGame.hasUpdate
     const isInstallError = status === 'InstallError'
@@ -370,6 +380,16 @@ const GameDetailsDialog: React.FC<GameDetailsDialogProps> = ({
             >
               Update
             </Button>
+            {!isStoredLocally && (
+              <Button
+                appearance="secondary"
+                icon={<DownloadIcon />}
+                onClick={() => onRedownload(currentGame)}
+                disabled={isBusy}
+              >
+                Re-download
+              </Button>
+            )}
             <Button
               appearance="danger"
               icon={<UninstallIcon />}
@@ -391,6 +411,16 @@ const GameDetailsDialog: React.FC<GameDetailsDialogProps> = ({
             >
               Reinstall
             </Button>
+            {!isStoredLocally && (
+              <Button
+                appearance="secondary"
+                icon={<DownloadIcon />}
+                onClick={() => onRedownload(currentGame)}
+                disabled={isBusy}
+              >
+                Re-download
+              </Button>
+            )}
             <Button
               appearance="danger"
               icon={<UninstallIcon />}
@@ -428,14 +458,26 @@ const GameDetailsDialog: React.FC<GameDetailsDialogProps> = ({
     }
 
     return (
-      <Button
-        appearance="primary"
-        icon={<DownloadIcon />}
-        onClick={() => onInstall(currentGame)}
-        disabled={isBusy}
-      >
-        {isConnected ? 'Install' : 'Download'}
-      </Button>
+      <>
+        <Button
+          appearance="primary"
+          icon={<DownloadIcon />}
+          onClick={() => onInstall(currentGame)}
+          disabled={isBusy}
+        >
+          {isConnected ? 'Install' : 'Download'}
+        </Button>
+        {isConnected && (
+          <Button
+            appearance="secondary"
+            icon={<DownloadIcon />}
+            onClick={() => onDownloadOnly(currentGame)}
+            disabled={isBusy}
+          >
+            Download Only
+          </Button>
+        )}
+      </>
     )
   }
 
@@ -501,27 +543,36 @@ const GameDetailsDialog: React.FC<GameDetailsDialogProps> = ({
                     </Text>
                     <div className={styles.badgesAndInfoContainer}>
                       <div className={styles.badgeGroup}>
-                        <Badge
-                          shape="rounded"
-                          color={(() => {
-                            const status = downloadStatusMap.get(game.releaseName || '')?.status
-                            if (game.isInstalled) return 'success'
-                            if (status === 'Completed') return 'brand'
-                            if (status === 'InstallError') return 'danger'
-                            if (status === 'Installing') return 'brand'
-                            return 'informative'
-                          })()}
-                          appearance="filled"
-                        >
-                          {(() => {
-                            const status = downloadStatusMap.get(game.releaseName || '')?.status
-                            if (game.isInstalled) return 'Installed'
-                            if (status === 'Completed') return 'Downloaded'
-                            if (status === 'InstallError') return 'Install Error'
-                            if (status === 'Installing') return 'Installing'
-                            return 'Not Installed'
-                          })()}
-                        </Badge>
+                        {currentStatus === 'InstallError' && !game.isInstalled ? (
+                          <Tooltip
+                            content={installErrorMessage || 'Installation failed. Check logs for details.'}
+                            relationship="label"
+                          >
+                            <span>
+                              <Badge shape="rounded" color="danger" appearance="filled">
+                                Install Error
+                              </Badge>
+                            </span>
+                          </Tooltip>
+                        ) : (
+                          <Badge
+                            shape="rounded"
+                            color={(() => {
+                              if (game.isInstalled) return 'success'
+                              if (currentStatus === 'Completed') return 'brand'
+                              if (currentStatus === 'Installing') return 'brand'
+                              return 'informative'
+                            })()}
+                            appearance="filled"
+                          >
+                            {(() => {
+                              if (game.isInstalled) return 'Installed'
+                              if (currentStatus === 'Completed') return 'Downloaded'
+                              if (currentStatus === 'Installing') return 'Installing'
+                              return 'Not Installed'
+                            })()}
+                          </Badge>
+                        )}
                         {game.hasUpdate && (
                           <Badge shape="rounded" color="brand" appearance="filled">
                             Update Available

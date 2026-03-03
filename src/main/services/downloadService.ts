@@ -1,5 +1,6 @@
 import { BrowserWindow } from 'electron'
 import { promises as fs, existsSync } from 'fs'
+import { resolve, sep } from 'path'
 import adbService from './adbService'
 import { EventEmitter } from 'events'
 import { debounce } from './download/utils'
@@ -7,9 +8,16 @@ import { QueueManager } from './download/queueManager'
 import { DownloadProcessor } from './download/downloadProcessor'
 import { ExtractionProcessor } from './download/extractionProcessor'
 import { InstallationProcessor } from './download/installationProcessor'
-import { DownloadAPI, GameInfo, DownloadItem, DownloadStatus } from '@shared/types'
+import {
+  DownloadAPI,
+  GameInfo,
+  DownloadItem,
+  DownloadStatus,
+  DownloadAddOptions
+} from '@shared/types'
 import settingsService from './settingsService'
 import { typedWebContentsSend } from '@shared/ipc-utils'
+import localLibraryService from './localLibraryService'
 
 interface VrpConfig {
   baseUri?: string
@@ -118,7 +126,7 @@ class DownloadService extends EventEmitter implements DownloadAPI {
     return Promise.resolve(this.queueManager.getQueue())
   }
 
-  public addToQueue(game: GameInfo): Promise<boolean> {
+  public addToQueue(game: GameInfo, options?: DownloadAddOptions): Promise<boolean> {
     if (!this.isInitialized) {
       console.error('DownloadService not initialized. Cannot add to queue.')
       return Promise.resolve(false)
@@ -132,8 +140,14 @@ class DownloadService extends EventEmitter implements DownloadAPI {
 
     if (existing) {
       if (existing.status === 'Completed') {
-        console.log(`Game ${game.releaseName} already downloaded.`)
-        return Promise.resolve(false)
+        if (!options?.forceRequeueCompleted) {
+          console.log(`Game ${game.releaseName} already downloaded.`)
+          return Promise.resolve(false)
+        }
+        console.log(
+          `Re-queue requested for completed item ${game.releaseName}; replacing existing queue entry.`
+        )
+        this.queueManager.removeItem(game.releaseName)
       } else if (existing.status !== 'Error' && existing.status !== 'Cancelled') {
         console.log(
           `Game ${game.releaseName} is already in the queue with status: ${existing.status}.`
@@ -154,7 +168,8 @@ class DownloadService extends EventEmitter implements DownloadAPI {
       addedDate: Date.now(),
       thumbnailPath: game.thumbnailPath,
       downloadPath: this.downloadsPath,
-      size: game.size
+      size: game.size,
+      skipInstall: options?.skipInstall === true
     }
     this.queueManager.addItem(newItem)
     console.log(`Added ${game.releaseName} to download queue.`)
@@ -285,6 +300,20 @@ class DownloadService extends EventEmitter implements DownloadAPI {
         return
       }
 
+      // Keep local library index in sync when content extraction has completed.
+      localLibraryService.rescan().catch((error) => {
+        console.warn('[Service ProcessQueue] Local library rescan failed after extraction:', error)
+      })
+
+      if (itemAfterExtraction.skipInstall) {
+        console.log(
+          `[Service ProcessQueue] Extraction successful for ${itemAfterExtraction.releaseName}. Auto-install skipped by request.`
+        )
+        this.isProcessing = false
+        this.processQueue()
+        return
+      }
+
       // Re-check connection state before installation (device might have disconnected during extraction)
       const finalTargetDeviceId = this.getTargetDeviceForInstallation()
       if (!finalTargetDeviceId) {
@@ -388,6 +417,28 @@ class DownloadService extends EventEmitter implements DownloadAPI {
     const mainWindow = BrowserWindow.getAllWindows()[0]
     if (mainWindow && !mainWindow.isDestroyed()) {
       typedWebContentsSend.send(mainWindow, 'download:queue-updated', this.queueManager.getQueue())
+    }
+  }
+
+  private isPathWithinRoot(pathToCheck: string, rootPath: string): boolean {
+    const normalizedPath = resolve(pathToCheck)
+    const normalizedRoot = resolve(rootPath)
+    return normalizedPath === normalizedRoot || normalizedPath.startsWith(`${normalizedRoot}${sep}`)
+  }
+
+  private async hasInstallablePayload(downloadPath: string): Promise<boolean> {
+    try {
+      const entries = await fs.readdir(downloadPath)
+      return entries.some((entry) => {
+        const lower = entry.toLowerCase()
+        return lower.endsWith('.apk') || lower === 'install.txt'
+      })
+    } catch (error) {
+      console.warn(
+        `[Service installFromCompleted] Failed to inspect download path "${downloadPath}":`,
+        error
+      )
+      return false
     }
   }
 
@@ -560,6 +611,9 @@ class DownloadService extends EventEmitter implements DownloadAPI {
       console.log(`Deleted directory ${downloadPath}.`)
       const removed = this.queueManager.removeItem(releaseName)
       if (removed) this.emitUpdate()
+      localLibraryService.rescan().catch((error) => {
+        console.warn('[Service deleteDownloadedFiles] Local library rescan failed:', error)
+      })
       return true
     } catch (error: unknown) {
       console.error(`Error deleting ${downloadPath} for ${releaseName}:`, error)
@@ -589,6 +643,27 @@ class DownloadService extends EventEmitter implements DownloadAPI {
         `[Service installFromCompleted] Item ${releaseName} has status ${item.status}, not 'Completed'. Cannot start installation.`
       )
       throw new Error(`Item ${releaseName} is not in 'Completed' state.`)
+    }
+
+    if (!item.downloadPath || !existsSync(item.downloadPath)) {
+      console.warn(
+        `[Service installFromCompleted] Local files missing for ${releaseName}. Path: ${item.downloadPath}`
+      )
+      throw new Error('LOCAL_FILES_MISSING')
+    }
+
+    if (!this.isPathWithinRoot(item.downloadPath, this.downloadsPath)) {
+      console.warn(
+        `[Service installFromCompleted] Blocking install for ${releaseName}; path ${item.downloadPath} is outside active download root ${this.downloadsPath}.`
+      )
+      throw new Error('LOCAL_PATH_OUTSIDE_ACTIVE_DOWNLOAD_ROOT')
+    }
+
+    if (!(await this.hasInstallablePayload(item.downloadPath))) {
+      console.warn(
+        `[Service installFromCompleted] Local files missing install payload for ${releaseName} in ${item.downloadPath}.`
+      )
+      throw new Error('LOCAL_FILES_MISSING')
     }
 
     if (this.isProcessing) {

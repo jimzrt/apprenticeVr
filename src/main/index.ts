@@ -12,6 +12,7 @@ import updateService from './services/updateService'
 import logsService from './services/logsService'
 import mirrorService from './services/mirrorService'
 import wifiBookmarksService from './services/wifiBookmarksService'
+import localLibraryService from './services/localLibraryService'
 import { typedIpcMain } from '@shared/ipc-utils'
 import settingsService from './services/settingsService'
 import { typedWebContentsSend } from '@shared/ipc-utils'
@@ -147,6 +148,12 @@ downloadService.on('installation:success', (deviceId) => {
   }
 })
 
+localLibraryService.on('updated', (index) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    typedWebContentsSend.send(mainWindow, 'local-library:updated', index)
+  }
+})
+
 // Function to send dependency progress to renderer
 function sendDependencyProgress(
   status: DependencyStatus,
@@ -222,6 +229,10 @@ async function createWindow(): Promise<void> {
             // Initialize WiFi Bookmarks Service
             await wifiBookmarksService.initialize()
             console.log('WiFi Bookmarks Service initialized.')
+
+            // Initialize Local Library Service
+            await localLibraryService.initialize()
+            console.log('Local Library Service initialized.')
             dependencyService.setDependencyServiceStatus('INITIALIZED')
 
             // Initialize Update Service
@@ -377,7 +388,9 @@ app.whenReady().then(async () => {
 
   // --- Download Handlers ---
   typedIpcMain.handle('download:get-queue', () => downloadService.getQueue())
-  typedIpcMain.handle('download:add', (_event, game) => downloadService.addToQueue(game))
+  typedIpcMain.handle('download:add', (_event, game, options) =>
+    downloadService.addToQueue(game, options)
+  )
   typedIpcMain.handle('download:delete-files', (_event, releaseName) =>
     downloadService.deleteDownloadedFiles(releaseName)
   )
@@ -394,6 +407,8 @@ app.whenReady().then(async () => {
       )
     })
   })
+  typedIpcMain.handle('local-library:get-index', async () => localLibraryService.getIndex())
+  typedIpcMain.handle('local-library:rescan', async () => await localLibraryService.rescan())
 
   // --- Upload Handlers ---
   typedIpcMain.handle(
@@ -755,6 +770,9 @@ app.on('window-all-closed', () => {
 // Clean up ADB tracking when app is quitting
 app.on('will-quit', () => {
   adbService.stopTrackingDevices()
+  localLibraryService.shutdown().catch((error) => {
+    console.warn('Failed to shutdown LocalLibraryService:', error)
+  })
   if (rendererServer) {
     rendererServer.close().catch((error) => {
       console.warn('Failed to close renderer server:', error)

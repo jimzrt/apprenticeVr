@@ -16,7 +16,7 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import { useAdb } from '../hooks/useAdb'
 import { useGames } from '../hooks/useGames'
 import { useDownload } from '../hooks/useDownload'
-import { GameInfo } from '@shared/types'
+import { GameInfo, LocalLibraryIndex } from '@shared/types'
 import placeholderImage from '../assets/images/game-placeholder.png'
 import {
   Button,
@@ -58,7 +58,10 @@ import {
   FolderAddRegular,
   DocumentRegular,
   ChevronDownRegular,
-  CopyRegular
+  CopyRegular,
+  ArrowSort20Filled,
+  ArrowSortUpLines20Regular,
+  ArrowSortDownLines20Regular
 } from '@fluentui/react-icons'
 import { ArrowLeftRegular } from '@fluentui/react-icons'
 import GameDetailsDialog from './GameDetailsDialog'
@@ -86,8 +89,9 @@ const FIXED_COLUMNS_WIDTH =
   COLUMN_WIDTHS.LAST_UPDATED
 
 type FilterType = 'all' | 'installed' | 'downloaded' | 'update'
+type GamesTableRow = GameInfo & { isDownloadedLocal: boolean }
 
-const filterGameNameAndPackage: FilterFn<GameInfo> = (row, _columnId, filterValue) => {
+const filterGameNameAndPackage: FilterFn<GamesTableRow> = (row, _columnId, filterValue) => {
   const searchStr = String(filterValue).toLowerCase()
   const gameName = String(row.original.name ?? '').toLowerCase()
   const packageName = String(row.original.packageName ?? '').toLowerCase()
@@ -99,7 +103,7 @@ const filterGameNameAndPackage: FilterFn<GameInfo> = (row, _columnId, filterValu
   )
 }
 
-const booleanEqualsFilter: FilterFn<GameInfo> = (row, columnId, filterValue) => {
+const booleanEqualsFilter: FilterFn<GamesTableRow> = (row, columnId, filterValue) => {
   if (filterValue === undefined) return true
   return row.getValue(columnId) === filterValue
 }
@@ -141,7 +145,8 @@ const renderPopularityStars = (value: number): React.ReactNode => {
 
 declare module '@tanstack/react-table' {
   interface FilterFns {
-    gameNameAndPackageFilter: FilterFn<GameInfo>
+    gameNameAndPackageFilter: FilterFn<GamesTableRow>
+    booleanEquals: FilterFn<GamesTableRow>
   }
 }
 
@@ -311,6 +316,8 @@ const GamesView: React.FC<GamesViewProps> = ({ onBackToDevices }) => {
   const [sorting, setSorting] = useState<SortingState>([])
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
   const [activeFilter, setActiveFilter] = useState<FilterType>('all')
+  const [excludeInstalled, setExcludeInstalled] = useState<boolean>(false)
+  const [excludeStoredLocal, setExcludeStoredLocal] = useState<boolean>(false)
   const [isLoading, setIsLoading] = useState<boolean>(false)
   const [dialogGame, setDialogGame] = useGameDialog()
   const [isDialogOpen, setIsDialogOpen] = useState<boolean>(false)
@@ -325,59 +332,140 @@ const GamesView: React.FC<GamesViewProps> = ({ onBackToDevices }) => {
   const [installSuccess, setInstallSuccess] = useState<boolean | null>(null)
   const [showObbConfirmDialog, setShowObbConfirmDialog] = useState<boolean>(false)
   const [obbFolderToConfirm, setObbFolderToConfirm] = useState<string | null>(null)
+  const [localLibraryIndex, setLocalLibraryIndex] = useState<LocalLibraryIndex>({
+    rootPath: '',
+    generatedAt: 0,
+    entries: []
+  })
 
   const downloadStatusMap = useMemo(() => {
-    const map = new Map<string, { status: string; progress: number }>()
+    const map = new Map<string, { status: string; progress: number; error?: string }>()
     downloadQueue.forEach((item) => {
       if (item.releaseName) {
         const progress =
           item.status === 'Extracting' ? (item.extractProgress ?? 0) : (item.progress ?? 0)
         map.set(item.releaseName, {
           status: item.status,
-          progress: progress
+          progress: progress,
+          error: item.error
         })
       }
     })
     return map
   }, [downloadQueue])
 
+  const localAvailability = useMemo(() => {
+    const releaseNames = new Set<string>()
+    const packageNames = new Set<string>()
+
+    for (const entry of localLibraryIndex.entries) {
+      if (entry.releaseName) {
+        releaseNames.add(entry.releaseName)
+      }
+      for (const packageName of entry.packageNames) {
+        packageNames.add(packageName)
+      }
+    }
+
+    return { releaseNames, packageNames }
+  }, [localLibraryIndex])
+
+  const isGameStoredLocally = useCallback(
+    (game: GameInfo): boolean => {
+      if (game.releaseName && localAvailability.releaseNames.has(game.releaseName)) {
+        return true
+      }
+      if (game.packageName && localAvailability.packageNames.has(game.packageName)) {
+        return true
+      }
+
+      return false
+    },
+    [localAvailability]
+  )
+
+  useEffect(() => {
+    let isMounted = true
+
+    const loadLocalLibrary = async (): Promise<void> => {
+      try {
+        const index = await window.api.localLibrary.getIndex()
+        if (isMounted) {
+          setLocalLibraryIndex(index)
+        }
+
+        // Force a fresh scan so manually added/removed files are reflected quickly.
+        const refreshedIndex = await window.api.localLibrary.rescan()
+        if (isMounted) {
+          setLocalLibraryIndex(refreshedIndex)
+        }
+      } catch (error) {
+        console.error('[GamesView] Failed to load local library index:', error)
+      }
+    }
+
+    const removeLocalLibraryUpdated = window.api.localLibrary.onUpdated((index) => {
+      setLocalLibraryIndex(index)
+    })
+
+    loadLocalLibrary()
+
+    return () => {
+      isMounted = false
+      removeLocalLibraryUpdated()
+    }
+  }, [])
+
   const counts = useMemo(() => {
     const total = games.length
     const installed = games.filter((g) => g.isInstalled).length
     const updates = games.filter((g) => g.hasUpdate).length
-    const downloaded = games.filter((g) => {
-      if (!g.releaseName || g.isInstalled) return false
-      return downloadStatusMap.get(g.releaseName)?.status === 'Completed'
-    }).length
+    const downloaded = games.filter((g) => !g.isInstalled && isGameStoredLocally(g)).length
     return { total, installed, downloaded, updates }
-  }, [games, downloadStatusMap])
+  }, [games, isGameStoredLocally])
+
+  const tableData = useMemo<GamesTableRow[]>(
+    () =>
+      games.map((game) => ({
+        ...game,
+        isDownloadedLocal: isGameStoredLocally(game)
+      })),
+    [games, isGameStoredLocally]
+  )
 
   useEffect(() => {
     setColumnFilters((prev) => {
       const otherFilters = prev.filter(
         (f) => f.id !== 'isInstalled' && f.id !== 'hasUpdate' && f.id !== 'isDownloaded'
       )
+      const nextFilters = [...otherFilters]
+
       switch (activeFilter) {
         case 'installed':
-          return [...otherFilters, { id: 'isInstalled', value: true }]
+          nextFilters.push({ id: 'isInstalled', value: true })
+          break
         case 'downloaded':
-          return [
-            ...otherFilters,
-            { id: 'isDownloaded', value: true },
-            { id: 'isInstalled', value: false }
-          ]
+          nextFilters.push({ id: 'isDownloaded', value: true }, { id: 'isInstalled', value: false })
+          break
         case 'update':
-          return [
-            ...otherFilters,
-            { id: 'isInstalled', value: true },
-            { id: 'hasUpdate', value: true }
-          ]
+          nextFilters.push({ id: 'isInstalled', value: true }, { id: 'hasUpdate', value: true })
+          break
         case 'all':
         default:
-          return otherFilters
+          break
       }
+
+      // Optional exclusions (icon toggles) when they don't conflict with a strict active filter.
+      if (excludeInstalled && activeFilter !== 'installed' && activeFilter !== 'update') {
+        nextFilters.push({ id: 'isInstalled', value: false })
+      }
+      if (excludeStoredLocal && activeFilter !== 'downloaded') {
+        nextFilters.push({ id: 'isDownloaded', value: false })
+      }
+
+      return nextFilters
     })
-  }, [activeFilter])
+  }, [activeFilter, excludeInstalled, excludeStoredLocal])
 
   useEffect(() => {
     const unsubscribe = window.api.adb.onInstallationCompleted((deviceId) => {
@@ -436,7 +524,7 @@ const GamesView: React.FC<GamesViewProps> = ({ onBackToDevices }) => {
     }
   }, [])
 
-  const columns = useMemo<ColumnDef<GameInfo>[]>(() => {
+  const columns = useMemo<ColumnDef<GamesTableRow>[]>(() => {
     // Calculate dynamic width for name column, with a minimum width
     const nameColumnWidth = Math.max(
       COLUMN_WIDTHS.MIN_NAME_PACKAGE,
@@ -446,16 +534,54 @@ const GamesView: React.FC<GamesViewProps> = ({ onBackToDevices }) => {
     return [
       {
         id: 'downloadStatus',
-        header: '',
+        header: () => (
+          <div className="status-header-filters">
+            <Tooltip
+              content={
+                excludeStoredLocal ? 'Stored local items are hidden' : 'Stored local items are visible'
+              }
+              relationship="label"
+            >
+              <button
+                type="button"
+                className={`status-filter-toggle ${excludeStoredLocal ? 'excluded' : ''}`}
+                onClick={() => setExcludeStoredLocal((value) => !value)}
+                aria-pressed={excludeStoredLocal}
+                aria-label="Toggle stored local filter"
+              >
+                <span className="status-filter-icon-wrap">
+                  <DesktopRegular fontSize={16} color={tokens.colorNeutralForeground2} aria-hidden />
+                </span>
+              </button>
+            </Tooltip>
+            <Tooltip
+              content={excludeInstalled ? 'Installed items are hidden' : 'Installed items are visible'}
+              relationship="label"
+            >
+              <button
+                type="button"
+                className={`status-filter-toggle ${excludeInstalled ? 'excluded' : ''}`}
+                onClick={() => setExcludeInstalled((value) => !value)}
+                aria-pressed={excludeInstalled}
+                aria-label="Toggle installed filter"
+              >
+                <span className="status-filter-icon-wrap">
+                  <CheckmarkCircleRegular
+                    fontSize={16}
+                    color={tokens.colorPaletteGreenForeground1}
+                    aria-hidden
+                  />
+                </span>
+              </button>
+            </Tooltip>
+          </div>
+        ),
         size: COLUMN_WIDTHS.STATUS,
         enableResizing: false,
         enableSorting: false,
         cell: ({ row }) => {
           const game = row.original
-          const downloadInfo = game.releaseName
-            ? downloadStatusMap.get(game.releaseName)
-            : undefined
-          const isDownloaded = downloadInfo?.status === 'Completed'
+          const isDownloaded = game.isDownloadedLocal
           const isInstalled = game.isInstalled
           const isUpdateAvailable = game.hasUpdate
 
@@ -571,9 +697,16 @@ const GamesView: React.FC<GamesViewProps> = ({ onBackToDevices }) => {
                   </div>
                 )}
                 {isInstallError && (
-                  <Badge shape="rounded" color="danger" appearance="outline">
-                    Install Error
-                  </Badge>
+                  <Tooltip
+                    content={downloadInfo?.error || 'Installation failed. Check logs for details.'}
+                    relationship="label"
+                  >
+                    <span>
+                      <Badge shape="rounded" color="danger" appearance="outline">
+                        Install Error
+                      </Badge>
+                    </span>
+                  </Tooltip>
                 )}
               </div>
               {(isDownloading || isExtracting || isInstalling) && downloadInfo && (
@@ -652,18 +785,21 @@ const GamesView: React.FC<GamesViewProps> = ({ onBackToDevices }) => {
       {
         id: 'isDownloaded',
         header: 'Downloaded Status',
-        accessorFn: (row) => {
-          if (!row.releaseName) return false
-          return downloadStatusMap.get(row.releaseName)?.status === 'Completed'
-        },
+        accessorKey: 'isDownloadedLocal',
         enableResizing: false,
         filterFn: 'booleanEquals'
       }
     ]
-  }, [downloadStatusMap, styles, tableWidth])
+  }, [
+    downloadStatusMap,
+    excludeInstalled,
+    excludeStoredLocal,
+    styles,
+    tableWidth
+  ])
 
-  const table = useReactTable({
-    data: games,
+  const table = useReactTable<GamesTableRow>({
+    data: tableData,
     columns,
     columnResizeMode: 'onChange',
     filterFns: {
@@ -728,7 +864,7 @@ const GamesView: React.FC<GamesViewProps> = ({ onBackToDevices }) => {
 
   const handleRowClick = (
     _event: React.MouseEvent<HTMLTableRowElement>,
-    row: Row<GameInfo>
+    row: Row<GamesTableRow>
   ): void => {
     console.log('Row clicked for game:', row.original.name)
     setDialogGame(row.original)
@@ -762,6 +898,59 @@ const GamesView: React.FC<GamesViewProps> = ({ onBackToDevices }) => {
       .catch((err) => {
         console.error('Error adding to queue:', err)
       })
+  }
+
+  const handleRedownload = (game: GameInfo): void => {
+    if (!game) return
+    console.log(`Re-download action triggered for: ${game.packageName}`)
+    addDownloadToQueue(game, { skipInstall: true, forceRequeueCompleted: true })
+      .then((success) => {
+        if (success) {
+          console.log(
+            `Successfully added ${game.releaseName} to download queue (skip auto-install).`
+          )
+        } else {
+          console.log(`Failed to add ${game.releaseName} to queue (might already exist).`)
+        }
+      })
+      .catch((err) => {
+        console.error('Error adding to queue for re-download:', err)
+      })
+  }
+
+  const handleDownloadOnly = (game: GameInfo): void => {
+    if (!game) return
+    console.log(`Download-only action triggered for: ${game.packageName}`)
+    addDownloadToQueue(game, { skipInstall: true, forceRequeueCompleted: true })
+      .then((success) => {
+        if (success) {
+          console.log(`Successfully added ${game.releaseName} to download queue (download-only).`)
+        } else {
+          console.log(`Failed to add ${game.releaseName} to queue (might already exist).`)
+        }
+      })
+      .catch((err) => {
+        console.error('Error adding to queue for download-only:', err)
+      })
+  }
+
+  const shouldFallbackToRedownload = (error: unknown): boolean => {
+    const message = error instanceof Error ? error.message : String(error)
+    return (
+      message.includes('LOCAL_FILES_MISSING') ||
+      message.includes('LOCAL_PATH_OUTSIDE_ACTIVE_DOWNLOAD_ROOT')
+    )
+  }
+
+  const queueForRedownload = async (game: GameInfo, context: string): Promise<boolean> => {
+    console.log(`${context}: Queuing re-download for ${game.releaseName}.`)
+    const addToQueueSuccess = await addDownloadToQueue(game, {
+      forceRequeueCompleted: true
+    })
+    if (!addToQueueSuccess) {
+      console.warn(`${context}: Failed to queue ${game.releaseName} for re-download.`)
+    }
+    return addToQueueSuccess
   }
 
   const handleUninstall = async (game: GameInfo): Promise<void> => {
@@ -828,24 +1017,37 @@ const GamesView: React.FC<GamesViewProps> = ({ onBackToDevices }) => {
         // The game is now uninstalled from the device.
         // Downloaded files (if any) should still be present.
 
-        const downloadInfo = downloadStatusMap.get(game.releaseName)
+        const hasLocalFiles = isGameStoredLocally(game)
 
-        if (downloadInfo?.status === 'Completed') {
+        if (hasLocalFiles) {
           console.log(
-            `Reinstall: Files for ${game.releaseName} are 'Completed'. Initiating install from completed.`
+            `Reinstall: Local files found for ${game.releaseName}. Initiating install from completed.`
           )
-          await window.api.downloads.installFromCompleted(game.releaseName, selectedDevice)
-          console.log(`Reinstall: 'installFromCompleted' called for ${game.releaseName}.`)
+          try {
+            await window.api.downloads.installFromCompleted(game.releaseName, selectedDevice)
+            console.log(`Reinstall: 'installFromCompleted' called for ${game.releaseName}.`)
+          } catch (installError) {
+            if (shouldFallbackToRedownload(installError)) {
+              const queued = await queueForRedownload(game, 'Reinstall')
+              if (!queued) {
+                window.alert(
+                  `Reinstall for ${game.name} failed: Could not queue re-download. Please check logs.`
+                )
+              }
+            } else {
+              throw installError
+            }
+          }
         } else {
           console.log(
-            `Reinstall: Files for ${game.releaseName} not 'Completed' (status: ${downloadInfo?.status}). Adding to download queue.`
+            `Reinstall: Local files not found for ${game.releaseName}. Adding to download queue.`
           )
-          const addToQueueSuccess = await addDownloadToQueue(game)
+          const addToQueueSuccess = await queueForRedownload(game, 'Reinstall')
           if (addToQueueSuccess) {
             console.log(`Reinstall: Successfully added ${game.releaseName} to download queue.`)
           } else {
             console.warn(
-              `Reinstall: Failed to add ${game.releaseName} to queue. Current status: ${downloadInfo?.status}.`
+              `Reinstall: Failed to add ${game.releaseName} to queue.`
             )
             window.alert(
               `Reinstall for ${game.name} failed: Could not add to download queue. Please check logs.`
@@ -890,26 +1092,39 @@ const GamesView: React.FC<GamesViewProps> = ({ onBackToDevices }) => {
     )
 
     try {
-      const downloadInfo = downloadStatusMap.get(game.releaseName)
+      const hasLocalFiles = isGameStoredLocally(game)
 
-      if (downloadInfo?.status === 'Completed') {
+      if (hasLocalFiles) {
         console.log(
-          `Update for ${game.releaseName}: Files are already 'Completed'. Initiating install from completed.`
+          `Update for ${game.releaseName}: Local files found. Initiating install from completed.`
         )
-        await window.api.downloads.installFromCompleted(game.releaseName, selectedDevice)
-        console.log(`Update: 'installFromCompleted' called for ${game.releaseName}.`)
+        try {
+          await window.api.downloads.installFromCompleted(game.releaseName, selectedDevice)
+          console.log(`Update: 'installFromCompleted' called for ${game.releaseName}.`)
+        } catch (installError) {
+          if (shouldFallbackToRedownload(installError)) {
+            const queued = await queueForRedownload(game, 'Update')
+            if (!queued) {
+              window.alert(
+                `Could not queue ${game.name} for re-download. It might already be in the queue or an error occurred.`
+              )
+            }
+          } else {
+            throw installError
+          }
+        }
         // Optionally, refresh packages or rely on 'installation-completed' event
         // loadPackages().catch(err => console.error('Update: Error refreshing packages post-install:', err));
       } else {
         console.log(
-          `Update for ${game.releaseName}: Files not 'Completed' (status: ${downloadInfo?.status}). Adding to download queue.`
+          `Update for ${game.releaseName}: Local files not found. Adding to download queue.`
         )
-        const addToQueueSuccess = await addDownloadToQueue(game)
+        const addToQueueSuccess = await queueForRedownload(game, 'Update')
         if (addToQueueSuccess) {
           console.log(`Update: Successfully added ${game.releaseName} to download queue.`)
         } else {
           console.warn(
-            `Update: Failed to add ${game.releaseName} to queue. Current status: ${downloadInfo?.status}.`
+            `Update: Failed to add ${game.releaseName} to queue.`
           )
           window.alert(
             `Could not queue ${game.name} for update. It might already be in the queue or an error occurred. Please check logs.`
@@ -936,17 +1151,26 @@ const GamesView: React.FC<GamesViewProps> = ({ onBackToDevices }) => {
     cancelDownload(game.releaseName)
   }
 
-  const handleInstallFromCompleted = (game: GameInfo): void => {
+  const handleInstallFromCompleted = async (game: GameInfo): Promise<void> => {
     if (!game || !game.releaseName || !selectedDevice) {
       console.error('Missing game, releaseName, or deviceId for install from completed action')
       window.alert('Cannot start installation: Missing required information.')
       return
     }
     console.log(`Requesting install from completed for ${game.releaseName} on ${selectedDevice}`)
-    window.api.downloads.installFromCompleted(game.releaseName, selectedDevice).catch((err) => {
+    try {
+      await window.api.downloads.installFromCompleted(game.releaseName, selectedDevice)
+    } catch (err) {
+      if (shouldFallbackToRedownload(err)) {
+        const queued = await queueForRedownload(game, 'InstallFromCompleted')
+        if (!queued) {
+          window.alert('Failed to queue re-download. Please check the main process logs.')
+        }
+        return
+      }
       console.error('Error triggering install from completed:', err)
       window.alert('Failed to start installation. Please check the main process logs.')
-    })
+    }
   }
 
   const handleDeleteDownloaded = useCallback(
@@ -1369,7 +1593,10 @@ const GamesView: React.FC<GamesViewProps> = ({ onBackToDevices }) => {
                   All ({counts.total})
                 </button>
                 <button
-                  onClick={() => setActiveFilter('installed')}
+                  onClick={() => {
+                    setExcludeInstalled(false)
+                    setActiveFilter('installed')
+                  }}
                   className={activeFilter === 'installed' ? 'active' : ''}
                 >
                   <span
@@ -1397,7 +1624,10 @@ const GamesView: React.FC<GamesViewProps> = ({ onBackToDevices }) => {
                   </span>
                 </button>
                 <button
-                  onClick={() => setActiveFilter('downloaded')}
+                  onClick={() => {
+                    setExcludeStoredLocal(false)
+                    setActiveFilter('downloaded')
+                  }}
                   className={activeFilter === 'downloaded' ? 'active' : ''}
                   disabled={counts.downloaded === 0}
                 >
@@ -1426,7 +1656,10 @@ const GamesView: React.FC<GamesViewProps> = ({ onBackToDevices }) => {
                   </span>
                 </button>
                 <button
-                  onClick={() => setActiveFilter('update')}
+                  onClick={() => {
+                    setExcludeInstalled(false)
+                    setActiveFilter('update')
+                  }}
                   className={activeFilter === 'update' ? 'active' : ''}
                   disabled={counts.updates === 0}
                 >
@@ -1497,11 +1730,44 @@ const GamesView: React.FC<GamesViewProps> = ({ onBackToDevices }) => {
                                 onClick: header.column.getToggleSortingHandler()
                               }}
                             >
-                              {flexRender(header.column.columnDef.header, header.getContext())}
-                              {{
-                                asc: ' 🔼',
-                                desc: ' 🔽'
-                              }[header.column.getIsSorted() as string] ?? null}
+                              <span
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: tokens.spacingHorizontalXS
+                                }}
+                              >
+                                {flexRender(header.column.columnDef.header, header.getContext())}
+                                {(() => {
+                                  const sortState = header.column.getIsSorted()
+                                  if (sortState === 'asc') {
+                                    return (
+                                      <ArrowSortUpLines20Regular
+                                        fontSize={16}
+                                        color={tokens.colorPaletteGreenForeground1}
+                                      />
+                                    )
+                                  }
+                                  if (sortState === 'desc') {
+                                    return (
+                                      <ArrowSortDownLines20Regular
+                                        fontSize={16}
+                                        color={tokens.colorPaletteRedForeground1}
+                                      />
+                                    )
+                                  }
+                                  if (header.column.getCanSort()) {
+                                    return (
+                                      <ArrowSort20Filled
+                                        fontSize={16}
+                                        color={tokens.colorNeutralForeground3}
+                                        style={{ opacity: 0.55 }}
+                                      />
+                                    )
+                                  }
+                                  return null
+                                })()}
+                              </span>
                             </div>
                           )}
                           {header.column.getCanResize() && (
@@ -1520,7 +1786,7 @@ const GamesView: React.FC<GamesViewProps> = ({ onBackToDevices }) => {
                   style={{ height: `${rowVirtualizer.getTotalSize()}px`, position: 'relative' }}
                 >
                   {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-                    const row = rows[virtualRow.index] as Row<GameInfo>
+                    const row = rows[virtualRow.index] as Row<GamesTableRow>
                     const rowClasses = [
                       row.original.isInstalled ? 'row-installed' : 'row-not-installed',
                       row.original.hasUpdate ? 'row-update-available' : ''
@@ -1566,7 +1832,10 @@ const GamesView: React.FC<GamesViewProps> = ({ onBackToDevices }) => {
                 open={isDialogOpen}
                 onClose={handleCloseDialog}
                 downloadStatusMap={downloadStatusMap}
+                isStoredLocally={dialogGame ? isGameStoredLocally(dialogGame) : false}
                 onInstall={handleInstall}
+                onDownloadOnly={handleDownloadOnly}
+                onRedownload={handleRedownload}
                 onUninstall={handleUninstall}
                 onReinstall={handleReinstall}
                 onUpdate={handleUpdate}

@@ -12,7 +12,8 @@ import {
   BlacklistEntry,
   Mirror,
   MirrorTestResult,
-  WiFiBookmark
+  WiFiBookmark,
+  LocalLibraryIndex
 } from './index'
 
 // Define types for all IPC channels between renderer and main
@@ -62,10 +63,15 @@ export interface IPCChannels {
 
   // Download related channels
   'download:get-queue': DefineChannel<[], DownloadItem[]>
-  'download:add': DefineChannel<[game: GameInfo], boolean>
+  'download:add': DefineChannel<
+    [game: GameInfo, options?: { skipInstall?: boolean; forceRequeueCompleted?: boolean }],
+    boolean
+  >
   'download:remove': DefineChannel<[releaseName: string], void>
   'download:delete-files': DefineChannel<[releaseName: string], boolean>
   'download:install-from-completed': DefineChannel<[releaseName: string, deviceId: string], void>
+  'local-library:get-index': DefineChannel<[], LocalLibraryIndex>
+  'local-library:rescan': DefineChannel<[], LocalLibraryIndex>
 
   // Upload related channels
   'upload:prepare': DefineChannel<
@@ -165,4 +171,5 @@ export interface IPCEvents {
   'update:update-downloaded': [updateInfo: UpdateInfo]
   'mirrors:test-progress': [id: string, status: 'testing' | 'success' | 'failed', error?: string]
   'mirrors:mirrors-updated': [mirrors: Mirror[]]
+  'local-library:updated': [index: LocalLibraryIndex]
 }

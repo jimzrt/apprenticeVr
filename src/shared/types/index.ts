@@ -141,12 +141,36 @@ export interface DownloadItem {
   eta?: string
   extractProgress?: number
   size?: string
+  // If true, download/extract completes but auto-install step is skipped.
+  skipInstall?: boolean
+}
+
+export interface DownloadAddOptions {
+  skipInstall?: boolean
+  forceRequeueCompleted?: boolean
 }
 
 export interface DownloadProgress {
   packageName: string
   stage: 'download' | 'extract' | 'copy' | 'install'
   progress: number
+}
+
+export interface LocalLibraryEntry {
+  id: string
+  releaseName: string
+  path: string
+  source: 'folder' | 'apk-file'
+  apkCount: number
+  hasInstallScript: boolean
+  packageNames: string[]
+  lastSeen: number
+}
+
+export interface LocalLibraryIndex {
+  rootPath: string
+  generatedAt: number
+  entries: LocalLibraryEntry[]
 }
 
 // Update types
@@ -254,7 +278,7 @@ export interface GameAPIRenderer
 
 export interface DownloadAPI {
   getQueue: () => Promise<DownloadItem[]>
-  addToQueue: (game: GameInfo) => Promise<boolean>
+  addToQueue: (game: GameInfo, options?: DownloadAddOptions) => Promise<boolean>
   removeFromQueue: (releaseName: string) => Promise<void>
   cancelUserRequest: (releaseName: string) => void
   retryDownload: (releaseName: string) => void
@@ -270,6 +294,15 @@ export interface DownloadAPIRenderer extends DownloadAPI {
   installFromCompleted: (releaseName: string, deviceId: string) => Promise<void>
   installManualFile: (filePath: string, deviceId: string) => Promise<boolean>
   copyObbFolder: (folderPath: string, deviceId: string) => Promise<boolean>
+}
+
+export interface LocalLibraryAPI {
+  getIndex: () => Promise<LocalLibraryIndex>
+  rescan: () => Promise<LocalLibraryIndex>
+}
+
+export interface LocalLibraryAPIRenderer extends LocalLibraryAPI {
+  onUpdated: (callback: (index: LocalLibraryIndex) => void) => () => void
 }
 
 export interface UploadAPI {

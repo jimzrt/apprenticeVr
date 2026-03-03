@@ -28,10 +28,15 @@ class AdbService extends EventEmitter implements AdbAPI {
   private isTracking = false
   private status: ServiceStatus = 'NOT_INITIALIZED'
   private aaptPushed = false
+  private lastInstallError: string | null = null
 
   constructor() {
     super()
     this.client = null
+  }
+
+  public getLastInstallError(): string | null {
+    return this.lastInstallError
   }
 
   public async initialize(): Promise<ServiceStatus> {
@@ -483,6 +488,7 @@ class AdbService extends EventEmitter implements AdbAPI {
     console.log(
       `[ADB Service] Attempting to install ${apkPath} on ${serial}${options?.flags ? ` with flags: ${options.flags.join(' ')}` : ''}...`
     )
+    this.lastInstallError = null
     const deviceClient = this.client.getDevice(serial)
 
     if (options?.flags && options.flags.length > 0) {
@@ -554,11 +560,13 @@ class AdbService extends EventEmitter implements AdbAPI {
         }
 
         if (output?.includes('Success')) {
+          this.lastInstallError = null
           console.log(
             `[ADB Service] Successfully installed ${apkPath} with flags. Output: ${output}`
           )
           return true
         } else {
+          this.lastInstallError = (output && output.trim()) || 'Installation failed'
           console.error(
             `[ADB Service] Installation of ${apkPath} with flags failed or success not confirmed. Output: ${output || 'No output'}`
           )
@@ -579,6 +587,7 @@ class AdbService extends EventEmitter implements AdbAPI {
           return false
         }
       } catch (error) {
+        this.lastInstallError = error instanceof Error ? error.message : String(error)
         console.error(
           `[ADB Service] Error during flagged installation of ${apkPath} on device ${serial}:`,
           error
@@ -599,14 +608,17 @@ class AdbService extends EventEmitter implements AdbAPI {
       try {
         const success = await deviceClient.install(apkPath)
         if (success) {
+          this.lastInstallError = null
           console.log(`[ADB Service] Successfully installed ${apkPath} using adbkit.install.`)
         } else {
+          this.lastInstallError = 'Installation reported failure'
           console.error(
             `[ADB Service] Installation of ${apkPath} reported failure by adbkit.install.`
           )
         }
         return success
       } catch (error) {
+        this.lastInstallError = error instanceof Error ? error.message : String(error)
         console.error(
           `[ADB Service] Error installing package ${apkPath} on device ${serial} (adbkit.install):`,
           error

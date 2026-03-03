@@ -1,4 +1,4 @@
-import { join } from 'path'
+import { basename, dirname, join } from 'path'
 import { promises as fs, createReadStream, createWriteStream, promises as fsPromises } from 'fs'
 import { execa, ExecaError } from 'execa'
 import crypto from 'crypto'
@@ -28,6 +28,7 @@ export class DownloadProcessor {
   private queueManager: QueueManager
   private vrpConfig: VrpConfig | null = null
   private debouncedEmitUpdate: () => void
+  private static readonly PUBLIC_DOWNLOAD_STALL_TIMEOUT_MS = 120000
 
   constructor(queueManager: QueueManager, debouncedEmitUpdate: () => void) {
     this.queueManager = queueManager
@@ -36,6 +37,28 @@ export class DownloadProcessor {
 
   public setVrpConfig(config: VrpConfig | null): void {
     this.vrpConfig = config
+  }
+
+  /**
+   * Resolve the item download directory while preventing repeated
+   * "<release>/<release>/..." path nesting across fallback/retry flows.
+   */
+  private resolveItemDownloadPath(item: DownloadItem): string {
+    let basePath = item.downloadPath
+
+    // Collapse duplicate trailing release-name segments if they exist.
+    while (
+      basename(basePath) === item.releaseName &&
+      basename(dirname(basePath)) === item.releaseName
+    ) {
+      basePath = dirname(basePath)
+    }
+
+    if (basename(basePath) === item.releaseName) {
+      return basePath
+    }
+
+    return join(basePath, item.releaseName)
   }
 
   // Add getter for vrpConfig
@@ -146,7 +169,7 @@ export class DownloadProcessor {
       return { success: false, startExtraction: false }
     }
 
-    const downloadPath = join(item.downloadPath, item.releaseName)
+    const downloadPath = this.resolveItemDownloadPath(item)
     this.queueManager.updateItem(item.releaseName, { downloadPath: downloadPath })
 
     try {
@@ -259,7 +282,7 @@ export class DownloadProcessor {
       return { success: false, startExtraction: false }
     }
 
-    const downloadPath = join(item.downloadPath, item.releaseName)
+    const downloadPath = this.resolveItemDownloadPath(item)
     this.queueManager.updateItem(item.releaseName, { downloadPath: downloadPath })
 
     const gameNameHash = crypto
@@ -293,6 +316,47 @@ export class DownloadProcessor {
     }
 
     let lastProgress = -1
+    let lastTransferredBytes = 0
+    let lastAdvanceAt = Date.now()
+    let killedByStallWatchdog = false
+    let stallWatchdog: NodeJS.Timeout | null = null
+
+    const parseTransferredBytes = (line: string): number | null => {
+      const transferMatch = line.match(
+        /([0-9]+(?:\.[0-9]+)?)\s*([KMGTPE]?i?B)\s*\/\s*([0-9]+(?:\.[0-9]+)?)\s*([KMGTPE]?i?B)/i
+      )
+      if (!transferMatch) return null
+
+      const value = Number(transferMatch[1])
+      const unit = transferMatch[2].toUpperCase()
+      if (Number.isNaN(value)) return null
+
+      const scale: Record<string, number> = {
+        B: 1,
+        KIB: 1024,
+        MIB: 1024 ** 2,
+        GIB: 1024 ** 3,
+        TIB: 1024 ** 4,
+        PIB: 1024 ** 5,
+        EIB: 1024 ** 6,
+        KB: 1000,
+        MB: 1000 ** 2,
+        GB: 1000 ** 3,
+        TB: 1000 ** 4,
+        PB: 1000 ** 5,
+        EB: 1000 ** 6
+      }
+
+      const multiplier = scale[unit]
+      if (!multiplier) return null
+
+      return Math.floor(value * multiplier)
+    }
+
+    const bumpActivity = (): void => {
+      lastAdvanceAt = Date.now()
+    }
+
     const handleRcloneOutput = (chunk: Buffer): void => {
       const text = chunk.toString().replace(/\r/g, '\n')
       const lines = text.split(/\n/)
@@ -301,12 +365,19 @@ export class DownloadProcessor {
           console.log(`[DownProc][rclone] ${line}`)
           pushLogLine(line)
 
+          const transferredBytes = parseTransferredBytes(line)
+          if (transferredBytes !== null && transferredBytes > lastTransferredBytes) {
+            lastTransferredBytes = transferredBytes
+            bumpActivity()
+          }
+
           const progressMatch =
             line.match(/Transferred:.*?(\d+)%/) || line.match(/,\s*(\d+)%\s*,/)
           if (progressMatch && progressMatch[1]) {
             const progress = Number(progressMatch[1])
             if (!Number.isNaN(progress) && progress !== lastProgress) {
               lastProgress = progress
+              bumpActivity()
 
               const speedMatch = line.match(/,\s*([0-9.]+\s*\w+\/s)(?:,|$)/)
               const etaMatch = line.match(/ETA\s+([0-9hms:]+|[-]+)\b/i)
@@ -345,11 +416,34 @@ export class DownloadProcessor {
         mountProcess: rcloneProcess
       })
 
+      stallWatchdog = setInterval(() => {
+        if (killedByStallWatchdog) return
+        const currentItem = this.queueManager.findItem(item.releaseName)
+        if (!currentItem || currentItem.status !== 'Downloading') return
+
+        const idleMs = Date.now() - lastAdvanceAt
+        if (
+          idleMs >= DownloadProcessor.PUBLIC_DOWNLOAD_STALL_TIMEOUT_MS &&
+          (lastProgress < 100 || lastTransferredBytes === 0)
+        ) {
+          killedByStallWatchdog = true
+          console.error(
+            `[DownProc] Detected stalled rclone download for ${item.releaseName} (no transfer progress for ${Math.round(idleMs / 1000)}s). Terminating process.`
+          )
+          rcloneProcess.kill('SIGTERM')
+        }
+      }, 10000)
+
       console.log(
         `[DownProc] rclone process started for ${item.releaseName} with PID: ${rcloneProcess.pid}`
       )
 
       await rcloneProcess
+
+      if (stallWatchdog) {
+        clearInterval(stallWatchdog)
+        stallWatchdog = null
+      }
 
       this.activeDownloads.delete(item.releaseName)
       this.queueManager.updateItem(item.releaseName, { pid: undefined })
@@ -375,18 +469,27 @@ export class DownloadProcessor {
         console.error(`[DownProc] rclone log tail:\n${rcloneLogTail.join('\n')}`)
       }
 
+      if (stallWatchdog) {
+        clearInterval(stallWatchdog)
+        stallWatchdog = null
+      }
+
       if (this.activeDownloads.has(item.releaseName)) {
         this.activeDownloads.delete(item.releaseName)
         this.queueManager.updateItem(item.releaseName, { pid: undefined })
       }
 
-      if (isExecaError(error) && error.exitCode === 143) {
+      if (isExecaError(error) && error.exitCode === 143 && !killedByStallWatchdog) {
         console.log(`[DownProc] rclone download cancelled for ${item.releaseName}`)
         return { success: false, startExtraction: false, finalState: currentItemState }
       }
 
       let errorMessage = 'Public endpoint download failed.'
-      if (isExecaError(error)) {
+      if (killedByStallWatchdog) {
+        errorMessage = `Download stalled: no transfer progress for ${Math.round(
+          DownloadProcessor.PUBLIC_DOWNLOAD_STALL_TIMEOUT_MS / 1000
+        )}s`
+      } else if (isExecaError(error)) {
         errorMessage = error.shortMessage || error.message
       } else if (error instanceof Error) {
         errorMessage = error.message
@@ -432,7 +535,7 @@ export class DownloadProcessor {
       return { success: false, startExtraction: false }
     }
 
-    const downloadPath = join(item.downloadPath, item.releaseName)
+    const downloadPath = this.resolveItemDownloadPath(item)
     this.queueManager.updateItem(item.releaseName, { downloadPath: downloadPath })
 
     // Create unique mount point for this download (sanitize name to avoid issues)
