@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useMemo, useState } from 'react'
 import { useDownload } from '../hooks/useDownload'
 import { useAdb } from '../hooks/useAdb'
 import { DownloadItem } from '@shared/types'
@@ -10,7 +10,9 @@ import {
   Button,
   ProgressBar,
   Image,
-  Badge
+  Badge,
+  Dropdown,
+  Option
 } from '@fluentui/react-components'
 import {
   DeleteRegular,
@@ -30,6 +32,20 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     padding: tokens.spacingHorizontalXXL,
     gap: tokens.spacingVerticalL
+  },
+  headerRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: tokens.spacingHorizontalM
+  },
+  sortControls: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS
+  },
+  sortDropdown: {
+    minWidth: '160px'
   },
   itemRow: {
     display: 'grid',
@@ -97,6 +113,7 @@ const DownloadsView: React.FC<DownloadsViewProps> = ({ onClose }) => {
   const { games } = useGames()
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [_, setDialogGame] = useGameDialog()
+  const [sortBy, setSortBy] = useState<'date' | 'name' | 'size'>('date')
 
   const formatAddedTime = (timestamp: number): string => {
     try {
@@ -106,6 +123,66 @@ const DownloadsView: React.FC<DownloadsViewProps> = ({ onClose }) => {
       return 'Invalid date'
     }
   }
+
+  const gameSizeByRelease = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const game of games) {
+      if (game.releaseName && game.size) {
+        map.set(game.releaseName, game.size)
+      }
+      if (game.packageName && game.size) {
+        map.set(game.packageName, game.size)
+      }
+    }
+    return map
+  }, [games])
+
+  const resolveItemSize = (item: DownloadItem): string | undefined => {
+    if (item.size && item.size.trim().length > 0) {
+      return item.size
+    }
+    return gameSizeByRelease.get(item.releaseName) || gameSizeByRelease.get(item.packageName)
+  }
+
+  const formatSize = (size?: string): string => {
+    if (!size || size.trim().length === 0) return 'Unknown size'
+    return size
+  }
+
+  const parseSizeToBytes = (size?: string): number => {
+    if (!size) return 0
+    const match = size.trim().match(/^([\d.]+)\s*(B|KB|MB|GB|TB)$/i)
+    if (!match) return 0
+    const value = Number(match[1])
+    if (Number.isNaN(value)) return 0
+    const unit = match[2].toUpperCase()
+    const multiplier =
+      unit === 'KB'
+        ? 1024
+        : unit === 'MB'
+          ? 1024 ** 2
+          : unit === 'GB'
+            ? 1024 ** 3
+            : unit === 'TB'
+              ? 1024 ** 4
+              : 1
+    return value * multiplier
+  }
+
+  const sortedQueue = useMemo(() => {
+    const copy = [...queue]
+    if (sortBy === 'name') {
+      copy.sort((a, b) => a.gameName.localeCompare(b.gameName))
+    } else if (sortBy === 'size') {
+      copy.sort(
+        (a, b) =>
+          parseSizeToBytes(resolveItemSize(b)) - parseSizeToBytes(resolveItemSize(a))
+      )
+    } else {
+      copy.sort((a, b) => b.addedDate - a.addedDate)
+    }
+    return copy
+  }, [queue, sortBy, gameSizeByRelease])
 
   const handleInstallFromCompleted = (releaseName: string): void => {
     if (!releaseName || !selectedDevice) {
@@ -175,9 +252,36 @@ const DownloadsView: React.FC<DownloadsViewProps> = ({ onClose }) => {
         <Text>Download queue is empty.</Text>
       ) : (
         <div>
-          {queue
-            .sort((a, b) => b.addedDate - a.addedDate)
-            .map((item) => (
+          <div className={styles.headerRow}>
+            <Title2>Downloads</Title2>
+            <div className={styles.sortControls}>
+              <Text size={200}>Sort by</Text>
+              <Dropdown
+                className={styles.sortDropdown}
+                value={
+                  sortBy === 'name' ? 'Name' : sortBy === 'size' ? 'Size' : 'Date Added'
+                }
+                selectedOptions={[sortBy]}
+                onOptionSelect={(_, data) => {
+                  if (data.optionValue) {
+                    setSortBy(data.optionValue as 'date' | 'name' | 'size')
+                  }
+                }}
+                placeholder="Sort by..."
+              >
+                <Option value="date" text="Date Added">
+                  Date Added
+                </Option>
+                <Option value="name" text="Name">
+                  Name
+                </Option>
+                <Option value="size" text="Size">
+                  Size
+                </Option>
+              </Dropdown>
+            </div>
+          </div>
+          {sortedQueue.map((item) => (
               <div key={item.releaseName} className={styles.itemRow}>
                 {/* Thumbnail */}
                 <Image
@@ -219,7 +323,8 @@ const DownloadsView: React.FC<DownloadsViewProps> = ({ onClose }) => {
                     {item.releaseName}
                   </Text>
                   <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
-                    Added: {formatAddedTime(item.addedDate)}
+                    Added: {formatAddedTime(item.addedDate)} · Size:{' '}
+                    {formatSize(resolveItemSize(item))}
                   </Text>
                 </div>
                 {/* Progress / Status */}

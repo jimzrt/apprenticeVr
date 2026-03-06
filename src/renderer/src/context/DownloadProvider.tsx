@@ -1,6 +1,6 @@
 import React, { ReactNode, useEffect, useState, useCallback } from 'react'
 import { DownloadContext, DownloadContextType } from './DownloadContext'
-import { DownloadItem, GameInfo } from '@shared/types'
+import { DownloadAddOptions, DownloadItem, GameInfo } from '@shared/types'
 
 interface DownloadProviderProps {
   children: ReactNode
@@ -46,10 +46,10 @@ export const DownloadProvider: React.FC<DownloadProviderProps> = ({ children }) 
     }
   }, [])
 
-  const addToQueue = useCallback(async (game: GameInfo): Promise<boolean> => {
+  const addToQueue = useCallback(async (game: GameInfo, options?: DownloadAddOptions): Promise<boolean> => {
     console.log(`Context: Adding ${game.releaseName} to queue...`)
     try {
-      const success = await window.api.downloads.addToQueue(game)
+      const success = await window.api.downloads.addToQueue(game, options)
       if (!success) {
         console.warn(
           `Context: Failed to add ${game.releaseName} to queue (likely already present).`

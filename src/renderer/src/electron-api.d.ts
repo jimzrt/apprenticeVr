@@ -10,7 +10,8 @@ import {
   DependencyAPIRenderer,
   LogsAPIRenderer,
   MirrorAPIRenderer,
-  WiFiBookmark
+  WiFiBookmark,
+  LocalLibraryAPIRenderer
 } from '@shared/types'
 
 declare global {
@@ -26,6 +27,7 @@ declare global {
       updates: UpdateAPIRenderer
       logs: LogsAPIRenderer
       mirrors: MirrorAPIRenderer
+      localLibrary: LocalLibraryAPIRenderer
       dialog: {
         showDirectoryPicker: () => Promise<string | null>
         showFilePicker: (options?: {

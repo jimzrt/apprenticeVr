@@ -166,8 +166,17 @@ export class InstallationProcessor {
                   // Ensure -r and -g are included for compatibility and permissions.
                   const combinedFlags = Array.from(new Set(['-r', '-g', ...installArgs]))
 
-                  await this.adbService.installPackage(deviceId, apkPath, { flags: combinedFlags })
-                  commandSuccess = true // Assuming installPackage throws on error
+                  const installSucceeded = await this.adbService.installPackage(deviceId, apkPath, {
+                    flags: combinedFlags
+                  })
+                  if (installSucceeded) {
+                    commandSuccess = true
+                  } else {
+                    const installError = this.adbService.getLastInstallError()
+                    errorMessage = installError
+                      ? `Install command failed for ${apkArg}: ${installError}`
+                      : `Install command failed for ${apkArg}`
+                  }
                   // if (output?.includes('Success')) {
                   //   commandSuccess = true
                   // } else {
@@ -307,7 +316,23 @@ export class InstallationProcessor {
         console.log(`[InstallProc Standard] Installing ${apkPath}...`)
         try {
           // Use the simplified installPackage, now with flags for reinstall and granting permissions
-          await this.adbService.installPackage(deviceId, apkPath, { flags: ['-r', '-g'] })
+          const installSucceeded = await this.adbService.installPackage(deviceId, apkPath, {
+            flags: ['-r', '-g']
+          })
+          if (!installSucceeded) {
+            const installError = this.adbService.getLastInstallError()
+            console.error(`[InstallProc Standard] Failed to install ${apk} (adb returned false)`)
+            this.updateItemStatus(
+              item.releaseName,
+              'InstallError',
+              100,
+              installError
+                ? `Failed to install ${apk}: ${installError}`
+                : `Failed to install ${apk}: device rejected install`,
+              100
+            )
+            return false
+          }
           console.log(`[InstallProc Standard] Successfully installed ${apk}`)
         } catch (installError: unknown) {
           const errorMsg =

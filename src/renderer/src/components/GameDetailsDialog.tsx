@@ -15,7 +15,8 @@ import {
   Badge,
   Divider,
   Spinner,
-  ProgressBar
+  ProgressBar,
+  Tooltip
 } from '@fluentui/react-components'
 import {
   ArrowClockwiseRegular,
@@ -33,6 +34,7 @@ import {
   BroomRegular as UninstallIcon
 } from '@fluentui/react-icons'
 import placeholderImage from '../assets/images/game-placeholder.png'
+import youtubeLogo from '../assets/images/youtube-logo.svg'
 import YouTube from 'react-youtube'
 import { useGames } from '@renderer/hooks/useGames'
 
@@ -127,6 +129,43 @@ const useStyles = makeStyles({
     paddingTop: '56.25%', // 16:9 aspect ratio
     marginTop: tokens.spacingVerticalM
   },
+  youtubeFallback: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: '100%',
+    height: '100%',
+    display: 'grid',
+    placeItems: 'center',
+    backgroundColor: tokens.colorNeutralBackground2,
+    borderRadius: tokens.borderRadiusMedium,
+    overflow: 'hidden',
+    textAlign: 'center'
+  },
+  youtubeFallbackContent: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: tokens.spacingVerticalS,
+    padding: tokens.spacingVerticalM
+  },
+  youtubeFallbackThumb: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover',
+    position: 'absolute',
+    inset: 0,
+    filter: 'brightness(0.45)'
+  },
+  youtubeFallbackLogo: {
+    width: '120px',
+    height: 'auto',
+    marginBottom: tokens.spacingVerticalS
+  },
+  youtubeFallbackOverlay: {
+    position: 'relative',
+    zIndex: 1
+  },
   youtubePlayer: {
     position: 'absolute',
     top: 0,
@@ -150,8 +189,11 @@ interface GameDetailsDialogProps {
   game: GameInfo | null
   open: boolean
   onClose: () => void
-  downloadStatusMap: Map<string, { status: string; progress: number }>
+  downloadStatusMap: Map<string, { status: string; progress: number; error?: string }>
+  isStoredLocally: boolean
   onInstall: (game: GameInfo) => void
+  onDownloadOnly: (game: GameInfo) => void
+  onRedownload: (game: GameInfo) => void
   onUninstall: (game: GameInfo) => Promise<void>
   onReinstall: (game: GameInfo) => Promise<void>
   onUpdate: (game: GameInfo) => Promise<void>
@@ -169,7 +211,10 @@ const GameDetailsDialog: React.FC<GameDetailsDialogProps> = ({
   open,
   onClose,
   downloadStatusMap,
+  isStoredLocally,
   onInstall,
+  onDownloadOnly,
+  onRedownload,
   onUninstall,
   onReinstall,
   onUpdate,
@@ -187,6 +232,10 @@ const GameDetailsDialog: React.FC<GameDetailsDialogProps> = ({
   const [loadingNote, setLoadingNote] = useState<boolean>(false)
   const [videoId, setVideoId] = useState<string | null>(null)
   const [loadingVideo, setLoadingVideo] = useState<boolean>(false)
+  const [videoError, setVideoError] = useState<boolean>(false)
+  const statusInfo = game?.releaseName ? downloadStatusMap.get(game.releaseName) : undefined
+  const currentStatus = statusInfo?.status
+  const installErrorMessage = statusInfo?.error
 
   // Fetch note when dialog opens or game changes
   useEffect(() => {
@@ -228,6 +277,7 @@ const GameDetailsDialog: React.FC<GameDetailsDialogProps> = ({
 
       setLoadingVideo(true)
       setVideoId(null)
+      setVideoError(false)
 
       try {
         const videoId = await getTrailerVideoIdFromContext(game.name)
@@ -253,11 +303,20 @@ const GameDetailsDialog: React.FC<GameDetailsDialogProps> = ({
     }
   }, [open, game, getTrailerVideoIdFromContext])
 
+  const getYouTubeOrigin = (): string | undefined => {
+    if (typeof window === 'undefined') return undefined
+    const origin = window.location.origin
+    if (origin === 'null' || origin.startsWith('file:')) {
+      return 'http://localhost'
+    }
+    return origin
+  }
+
   // Helper function to render action buttons based on game state
   const renderActionButtons = (currentGame: GameInfo): React.ReactNode => {
     const status = downloadStatusMap.get(currentGame.releaseName || '')?.status
     const canCancel = status === 'Downloading' || status === 'Extracting' || status === 'Queued'
-    const isDownloaded = status === 'Completed'
+    const isDownloaded = isStoredLocally
     const isInstalled = currentGame.isInstalled
     const hasUpdate = currentGame.hasUpdate
     const isInstallError = status === 'InstallError'
@@ -322,6 +381,24 @@ const GameDetailsDialog: React.FC<GameDetailsDialogProps> = ({
               Update
             </Button>
             <Button
+              appearance="secondary"
+              icon={<DownloadIcon />}
+              onClick={() => onDownloadOnly(currentGame)}
+              disabled={isBusy}
+            >
+              Download Only
+            </Button>
+            {!isStoredLocally && (
+              <Button
+                appearance="secondary"
+                icon={<DownloadIcon />}
+                onClick={() => onRedownload(currentGame)}
+                disabled={isBusy}
+              >
+                Re-download
+              </Button>
+            )}
+            <Button
               appearance="danger"
               icon={<UninstallIcon />}
               onClick={() => onUninstall(currentGame)}
@@ -342,6 +419,24 @@ const GameDetailsDialog: React.FC<GameDetailsDialogProps> = ({
             >
               Reinstall
             </Button>
+            <Button
+              appearance="secondary"
+              icon={<DownloadIcon />}
+              onClick={() => onDownloadOnly(currentGame)}
+              disabled={isBusy}
+            >
+              Download Only
+            </Button>
+            {!isStoredLocally && (
+              <Button
+                appearance="secondary"
+                icon={<DownloadIcon />}
+                onClick={() => onRedownload(currentGame)}
+                disabled={isBusy}
+              >
+                Re-download
+              </Button>
+            )}
             <Button
               appearance="danger"
               icon={<UninstallIcon />}
@@ -379,14 +474,26 @@ const GameDetailsDialog: React.FC<GameDetailsDialogProps> = ({
     }
 
     return (
-      <Button
-        appearance="primary"
-        icon={<DownloadIcon />}
-        onClick={() => onInstall(currentGame)}
-        disabled={isBusy}
-      >
-        {isConnected ? 'Install' : 'Download'}
-      </Button>
+      <>
+        <Button
+          appearance="primary"
+          icon={<DownloadIcon />}
+          onClick={() => onInstall(currentGame)}
+          disabled={isBusy}
+        >
+          {isConnected ? 'Install' : 'Download'}
+        </Button>
+        {isConnected && (
+          <Button
+            appearance="secondary"
+            icon={<DownloadIcon />}
+            onClick={() => onDownloadOnly(currentGame)}
+            disabled={isBusy}
+          >
+            Download Only
+          </Button>
+        )}
+      </>
     )
   }
 
@@ -452,27 +559,36 @@ const GameDetailsDialog: React.FC<GameDetailsDialogProps> = ({
                     </Text>
                     <div className={styles.badgesAndInfoContainer}>
                       <div className={styles.badgeGroup}>
-                        <Badge
-                          shape="rounded"
-                          color={(() => {
-                            const status = downloadStatusMap.get(game.releaseName || '')?.status
-                            if (game.isInstalled) return 'success'
-                            if (status === 'Completed') return 'brand'
-                            if (status === 'InstallError') return 'danger'
-                            if (status === 'Installing') return 'brand'
-                            return 'informative'
-                          })()}
-                          appearance="filled"
-                        >
-                          {(() => {
-                            const status = downloadStatusMap.get(game.releaseName || '')?.status
-                            if (game.isInstalled) return 'Installed'
-                            if (status === 'Completed') return 'Downloaded'
-                            if (status === 'InstallError') return 'Install Error'
-                            if (status === 'Installing') return 'Installing'
-                            return 'Not Installed'
-                          })()}
-                        </Badge>
+                        {currentStatus === 'InstallError' && !game.isInstalled ? (
+                          <Tooltip
+                            content={installErrorMessage || 'Installation failed. Check logs for details.'}
+                            relationship="label"
+                          >
+                            <span>
+                              <Badge shape="rounded" color="danger" appearance="filled">
+                                Install Error
+                              </Badge>
+                            </span>
+                          </Tooltip>
+                        ) : (
+                          <Badge
+                            shape="rounded"
+                            color={(() => {
+                              if (game.isInstalled) return 'success'
+                              if (currentStatus === 'Completed') return 'brand'
+                              if (currentStatus === 'Installing') return 'brand'
+                              return 'informative'
+                            })()}
+                            appearance="filled"
+                          >
+                            {(() => {
+                              if (game.isInstalled) return 'Installed'
+                              if (currentStatus === 'Completed') return 'Downloaded'
+                              if (currentStatus === 'Installing') return 'Installing'
+                              return 'Not Installed'
+                            })()}
+                          </Badge>
+                        )}
                         {game.hasUpdate && (
                           <Badge shape="rounded" color="brand" appearance="filled">
                             Update Available
@@ -540,6 +656,37 @@ const GameDetailsDialog: React.FC<GameDetailsDialogProps> = ({
                 </div>
                 {loadingVideo ? (
                   <Spinner size="tiny" label="Searching for trailer..." />
+                ) : videoError && videoId ? (
+                  <div className={styles.youtubeContainer}>
+                    <div className={styles.youtubeFallback}>
+                      <img
+                        className={styles.youtubeFallbackThumb}
+                        src={`https://img.youtube.com/vi/${videoId}/hqdefault.jpg`}
+                        alt="Trailer thumbnail"
+                      />
+                      <div className={styles.youtubeFallbackOverlay}>
+                        <div className={styles.youtubeFallbackContent}>
+                          <img
+                            className={styles.youtubeFallbackLogo}
+                            src={youtubeLogo}
+                            alt="YouTube"
+                          />
+                          <Text weight="semibold">Trailer can’t play in-app</Text>
+                          <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
+                            Some videos block embeds. Open it on YouTube instead.
+                          </Text>
+                          <Button
+                            appearance="primary"
+                            onClick={() =>
+                              window.open(`https://www.youtube.com/watch?v=${videoId}`, '_blank')
+                            }
+                          >
+                            Open on YouTube
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 ) : videoId ? (
                   <div className={styles.youtubeContainer}>
                     <YouTube
@@ -548,9 +695,14 @@ const GameDetailsDialog: React.FC<GameDetailsDialogProps> = ({
                       opts={{
                         width: '100%',
                         height: '100%',
+                        host: 'https://www.youtube.com',
                         playerVars: {
-                          autoplay: 0
+                          autoplay: 0,
+                          origin: getYouTubeOrigin()
                         }
+                      }}
+                      onError={() => {
+                        setVideoError(true)
                       }}
                     />
                   </div>

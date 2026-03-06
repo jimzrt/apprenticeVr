@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import {
   Card,
   CardHeader,
@@ -30,6 +30,7 @@ import {
 import { useSettings } from '../hooks/useSettings'
 import { useGames } from '../hooks/useGames'
 import { useLogs } from '../hooks/useLogs'
+import { FuseStatus } from '@shared/types'
 
 // Supported speed units with conversion factors to KB/s
 const SPEED_UNITS = [
@@ -408,6 +409,9 @@ const Settings: React.FC = () => {
 
   const [localError, setLocalError] = useState<string | null>(null)
   const [saveSuccess, setSaveSuccess] = useState(false)
+  const [fuseStatus, setFuseStatus] = useState<FuseStatus | null>(null)
+  const [isCheckingFuse, setIsCheckingFuse] = useState(false)
+  const [fuseActionError, setFuseActionError] = useState<string | null>(null)
 
   // Update local state when the context values change
   useEffect(() => {
@@ -672,6 +676,52 @@ const Settings: React.FC = () => {
     }
   }
 
+  const refreshFuseStatus = useCallback(async (): Promise<void> => {
+    try {
+      setIsCheckingFuse(true)
+      setFuseActionError(null)
+      const status = await window.api.settings.getFuseStatus()
+      setFuseStatus(status)
+    } catch (err) {
+      console.error('Error checking FUSE status:', err)
+      setFuseActionError('Failed to check FUSE status')
+    } finally {
+      setIsCheckingFuse(false)
+    }
+  }, [])
+
+  const handleOpenFuseInstaller = async (): Promise<void> => {
+    try {
+      setFuseActionError(null)
+      const opened = await window.api.settings.openFuseInstaller()
+      if (!opened) {
+        setFuseActionError('FUSE installer is not available for this platform.')
+      }
+    } catch (err) {
+      console.error('Error opening FUSE installer page:', err)
+      setFuseActionError('Failed to open FUSE installer page')
+    }
+  }
+
+  const handleOpenFuseRemovalGuide = async (): Promise<void> => {
+    try {
+      setFuseActionError(null)
+      const opened = await window.api.settings.openFuseRemovalGuide()
+      if (!opened) {
+        setFuseActionError('FUSE removal guidance is not available for this platform.')
+      }
+    } catch (err) {
+      console.error('Error opening FUSE removal guidance:', err)
+      setFuseActionError('Failed to open FUSE removal guidance')
+    }
+  }
+
+  useEffect(() => {
+    refreshFuseStatus().catch((err) => {
+      console.error('Initial FUSE status check failed:', err)
+    })
+  }, [refreshFuseStatus])
+
   return (
     <div className={styles.root}>
       <div className={styles.contentContainer}>
@@ -800,6 +850,55 @@ const Settings: React.FC = () => {
                 Settings saved successfully
               </Text>
             )}
+          </div>
+        </Card>
+
+        <Card className={styles.card}>
+          <CardHeader description={<Subtitle1 weight="semibold">FUSE (Mount Support)</Subtitle1>} />
+          <div className={styles.cardContent}>
+            <Text>
+              Mount-based downloads work best when FUSE is installed. If unavailable, the app falls
+              back to direct downloads.
+            </Text>
+
+            <div className={styles.formRow}>
+              {isCheckingFuse ? (
+                <Spinner size="small" label="Checking FUSE status..." />
+              ) : (
+                <Text>
+                  {fuseStatus?.available ? 'FUSE available' : 'FUSE not available'} -{' '}
+                  {fuseStatus?.message ?? 'Status unknown'}
+                </Text>
+              )}
+            </div>
+
+            {fuseStatus?.detectedBy && (
+              <Text className={styles.hint}>
+                <InfoRegular />
+                Detected via: {fuseStatus.detectedBy}
+              </Text>
+            )}
+
+            <div
+              className={styles.formRow}
+              style={{ justifyContent: 'flex-end', marginTop: tokens.spacingVerticalM }}
+            >
+              <Button appearance="secondary" onClick={() => refreshFuseStatus()}>
+                Check Again
+              </Button>
+              {!fuseStatus?.available && fuseStatus?.installable && (
+                <Button appearance="primary" onClick={handleOpenFuseInstaller}>
+                  Install FUSE
+                </Button>
+              )}
+              {fuseStatus?.available && fuseStatus?.installable && (
+                <Button appearance="secondary" onClick={handleOpenFuseRemovalGuide}>
+                  Remove FUSE
+                </Button>
+              )}
+            </div>
+
+            {fuseActionError && <Text className={styles.error}>{fuseActionError}</Text>}
           </div>
         </Card>
 

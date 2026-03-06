@@ -20,7 +20,11 @@ import {
   LogsAPIRenderer,
   MirrorAPIRenderer,
   Mirror,
-  WiFiBookmark
+  WiFiBookmark,
+  LocalLibraryAPIRenderer,
+  LocalLibraryIndex,
+  DownloadAddOptions,
+  FuseStatus
 } from '@shared/types'
 import { typedIpcRenderer } from '@shared/ipc-utils'
 
@@ -103,7 +107,8 @@ const api = {
   // Download Queue APIs
   downloads: {
     getQueue: (): Promise<DownloadItem[]> => typedIpcRenderer.invoke('download:get-queue'),
-    addToQueue: (game: GameInfo): Promise<boolean> => typedIpcRenderer.invoke('download:add', game),
+    addToQueue: (game: GameInfo, options?: DownloadAddOptions): Promise<boolean> =>
+      typedIpcRenderer.invoke('download:add', game, options),
     removeFromQueue: (releaseName: string): Promise<void> =>
       typedIpcRenderer.invoke('download:remove', releaseName),
     cancelUserRequest: (releaseName: string): void =>
@@ -132,6 +137,15 @@ const api = {
     setAppConnectionState: (selectedDevice: string | null, isConnected: boolean): void =>
       ipcRenderer.send('download:set-app-connection-state', selectedDevice, isConnected)
   } satisfies DownloadAPIRenderer,
+  localLibrary: {
+    getIndex: (): Promise<LocalLibraryIndex> => typedIpcRenderer.invoke('local-library:get-index'),
+    rescan: (): Promise<LocalLibraryIndex> => typedIpcRenderer.invoke('local-library:rescan'),
+    onUpdated: (callback: (index: LocalLibraryIndex) => void): (() => void) => {
+      const listener = (_: IpcRendererEvent, index: LocalLibraryIndex): void => callback(index)
+      typedIpcRenderer.on('local-library:updated', listener)
+      return () => typedIpcRenderer.removeListener('local-library:updated', listener)
+    }
+  } satisfies LocalLibraryAPIRenderer,
   // Upload APIs
   uploads: {
     prepareUpload: (
@@ -202,7 +216,12 @@ const api = {
     getColorScheme: (): Promise<'light' | 'dark'> =>
       typedIpcRenderer.invoke('settings:get-color-scheme'),
     setColorScheme: (scheme: 'light' | 'dark'): Promise<void> =>
-      typedIpcRenderer.invoke('settings:set-color-scheme', scheme)
+      typedIpcRenderer.invoke('settings:set-color-scheme', scheme),
+    getFuseStatus: (): Promise<FuseStatus> => typedIpcRenderer.invoke('settings:get-fuse-status'),
+    openFuseInstaller: (): Promise<boolean> =>
+      typedIpcRenderer.invoke('settings:open-fuse-installer'),
+    openFuseRemovalGuide: (): Promise<boolean> =>
+      typedIpcRenderer.invoke('settings:open-fuse-removal-guide')
   } satisfies SettingsAPIRenderer,
   // Logs APIs
   logs: {

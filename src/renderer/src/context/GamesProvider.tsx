@@ -156,6 +156,15 @@ export const GamesProvider: React.FC<GamesProviderProps> = ({ children }) => {
 
   // enrich the games with the installed packages and the device version codes
   const games = useMemo((): GameInfo[] => {
+    if (!isDeviceConnected) {
+      return rawGames.map((game) => ({
+        ...game,
+        isInstalled: false,
+        deviceVersionCode: undefined,
+        hasUpdate: false
+      }))
+    }
+
     const installedSet = new Set(installedPackages.map((pkg) => pkg.packageName))
 
     return rawGames.map((game) => {
@@ -185,7 +194,7 @@ export const GamesProvider: React.FC<GamesProviderProps> = ({ children }) => {
         hasUpdate
       }
     })
-  }, [rawGames, installedPackages])
+  }, [rawGames, installedPackages, isDeviceConnected])
 
   const localGames = useMemo((): GameInfo[] => {
     return installedPackages.map((game) => ({
