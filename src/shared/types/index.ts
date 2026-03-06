@@ -350,6 +350,15 @@ export interface Settings {
   colorScheme: 'light' | 'dark'
 }
 
+export interface FuseStatus {
+  supported: boolean
+  available: boolean
+  installable: boolean
+  platform: NodeJS.Platform
+  message: string
+  detectedBy?: string
+}
+
 export interface SettingsAPI {
   getDownloadPath: () => string
   setDownloadPath: (path: string) => void
@@ -374,7 +383,11 @@ export interface SettingsAPIRenderer
       getColorScheme: () => Promise<'light' | 'dark'>
       setColorScheme: (scheme: 'light' | 'dark') => Promise<void>
     }
-  > {}
+  > {
+  getFuseStatus: () => Promise<FuseStatus>
+  openFuseInstaller: () => Promise<boolean>
+  openFuseRemovalGuide: () => Promise<boolean>
+}
 
 // Logs API
 export interface LogsAPI {

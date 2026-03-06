@@ -525,13 +525,61 @@ class DownloadService extends EventEmitter implements DownloadAPI {
     return Promise.resolve()
   }
 
-  public retryDownload(releaseName: string): Promise<void> {
+  public async retryDownload(releaseName: string): Promise<void> {
     const item = this.queueManager.findItem(releaseName)
     if (
       item &&
       (item.status === 'Cancelled' || item.status === 'Error' || item.status === 'InstallError')
     ) {
       console.log(`[Service] Retrying download: ${releaseName}`)
+
+      if (item.status === 'InstallError') {
+        const hasReusableLocalPayload =
+          !!item.downloadPath &&
+          existsSync(item.downloadPath) &&
+          (await this.hasInstallablePayload(item.downloadPath))
+
+        if (hasReusableLocalPayload) {
+          const resetToCompleted = this.queueManager.updateItem(releaseName, {
+            status: 'Completed',
+            error: undefined,
+            pid: undefined,
+            speed: undefined,
+            eta: undefined,
+            progress: 100
+          })
+
+          if (resetToCompleted) {
+            this.emitUpdate()
+          }
+
+          const targetDevice = this.getTargetDeviceForInstallation()
+          if (!targetDevice) {
+            console.warn(
+              `[Service Retry] ${releaseName} has local payload but no connected target device. Kept in Completed state.`
+            )
+            return Promise.resolve()
+          }
+
+          console.log(
+            `[Service Retry] Retrying installation from existing local payload for ${releaseName} on ${targetDevice}.`
+          )
+          try {
+            await this.installFromCompleted(releaseName, targetDevice)
+            return Promise.resolve()
+          } catch (error) {
+            console.warn(
+              `[Service Retry] Local install retry failed for ${releaseName}, falling back to re-download:`,
+              error
+            )
+            // Fall through to queue-based re-download retry path.
+          }
+        } else {
+          console.log(
+            `[Service Retry] No reusable local payload found for ${releaseName}. Falling back to re-download.`
+          )
+        }
+      }
 
       if (this.downloadProcessor.isDownloadActive(releaseName)) {
         console.warn(
@@ -635,7 +683,7 @@ class DownloadService extends EventEmitter implements DownloadAPI {
 
     if (!item) {
       console.error(`[Service installFromCompleted] Item not found: ${releaseName}`)
-      throw new Error(`Item not found: ${releaseName}`)
+      throw new Error('COMPLETED_ITEM_NOT_FOUND')
     }
 
     if (item.status !== 'Completed') {

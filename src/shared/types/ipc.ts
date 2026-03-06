@@ -13,7 +13,8 @@ import {
   Mirror,
   MirrorTestResult,
   WiFiBookmark,
-  LocalLibraryIndex
+  LocalLibraryIndex,
+  FuseStatus
 } from './index'
 
 // Define types for all IPC channels between renderer and main
@@ -96,6 +97,9 @@ export interface IPCChannels {
   'settings:set-upload-speed-limit': DefineChannel<[limit: number], void>
   'settings:get-color-scheme': DefineChannel<[], 'light' | 'dark'>
   'settings:set-color-scheme': DefineChannel<[scheme: 'light' | 'dark'], void>
+  'settings:get-fuse-status': DefineChannel<[], FuseStatus>
+  'settings:open-fuse-installer': DefineChannel<[], boolean>
+  'settings:open-fuse-removal-guide': DefineChannel<[], boolean>
 
   // Log upload related channels
   'logs:upload-current': DefineChannel<[], { url: string; password: string } | null>

@@ -23,7 +23,8 @@ import {
   WiFiBookmark,
   LocalLibraryAPIRenderer,
   LocalLibraryIndex,
-  DownloadAddOptions
+  DownloadAddOptions,
+  FuseStatus
 } from '@shared/types'
 import { typedIpcRenderer } from '@shared/ipc-utils'
 
@@ -215,7 +216,12 @@ const api = {
     getColorScheme: (): Promise<'light' | 'dark'> =>
       typedIpcRenderer.invoke('settings:get-color-scheme'),
     setColorScheme: (scheme: 'light' | 'dark'): Promise<void> =>
-      typedIpcRenderer.invoke('settings:set-color-scheme', scheme)
+      typedIpcRenderer.invoke('settings:set-color-scheme', scheme),
+    getFuseStatus: (): Promise<FuseStatus> => typedIpcRenderer.invoke('settings:get-fuse-status'),
+    openFuseInstaller: (): Promise<boolean> =>
+      typedIpcRenderer.invoke('settings:open-fuse-installer'),
+    openFuseRemovalGuide: (): Promise<boolean> =>
+      typedIpcRenderer.invoke('settings:open-fuse-removal-guide')
   } satisfies SettingsAPIRenderer,
   // Logs APIs
   logs: {

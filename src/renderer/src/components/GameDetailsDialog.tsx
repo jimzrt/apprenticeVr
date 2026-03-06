@@ -380,6 +380,14 @@ const GameDetailsDialog: React.FC<GameDetailsDialogProps> = ({
             >
               Update
             </Button>
+            <Button
+              appearance="secondary"
+              icon={<DownloadIcon />}
+              onClick={() => onDownloadOnly(currentGame)}
+              disabled={isBusy}
+            >
+              Download Only
+            </Button>
             {!isStoredLocally && (
               <Button
                 appearance="secondary"
@@ -410,6 +418,14 @@ const GameDetailsDialog: React.FC<GameDetailsDialogProps> = ({
               disabled={!isConnected || isBusy}
             >
               Reinstall
+            </Button>
+            <Button
+              appearance="secondary"
+              icon={<DownloadIcon />}
+              onClick={() => onDownloadOnly(currentGame)}
+              disabled={isBusy}
+            >
+              Download Only
             </Button>
             {!isStoredLocally && (
               <Button

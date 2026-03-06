@@ -28,7 +28,9 @@ export class DownloadProcessor {
   private queueManager: QueueManager
   private vrpConfig: VrpConfig | null = null
   private debouncedEmitUpdate: () => void
-  private static readonly PUBLIC_DOWNLOAD_STALL_TIMEOUT_MS = 120000
+  private static readonly PUBLIC_DOWNLOAD_STALL_NO_DATA_TIMEOUT_MS = 180000
+  private static readonly PUBLIC_DOWNLOAD_STALL_IDLE_AFTER_PROGRESS_TIMEOUT_MS = 420000
+  private static readonly PUBLIC_DOWNLOAD_STALL_POLL_INTERVAL_MS = 10000
 
   constructor(queueManager: QueueManager, debouncedEmitUpdate: () => void) {
     this.queueManager = queueManager
@@ -290,6 +292,7 @@ export class DownloadProcessor {
       .update(item.releaseName + '\n')
       .digest('hex')
     const source = `:http:/${gameNameHash}`
+    const downloadSpeedLimit = settingsService.getDownloadSpeedLimit()
 
     const rcloneArgs = [
       'copy',
@@ -298,11 +301,32 @@ export class DownloadProcessor {
       '--http-url',
       this.vrpConfig.baseUri,
       '--no-check-certificate',
+      '--retries',
+      '6',
+      '--retries-sleep',
+      '5s',
+      '--low-level-retries',
+      '20',
+      '--contimeout',
+      '20s',
+      '--timeout',
+      '3m',
+      '--transfers',
+      '2',
+      '--checkers',
+      '6',
       '--progress',
       '--stats',
       '1s',
       '--stats-one-line'
     ]
+    if (Number.isFinite(downloadSpeedLimit) && downloadSpeedLimit > 0) {
+      // rclone treats bare numeric bwlimit values as KiB/s.
+      rcloneArgs.push('--bwlimit', `${Math.floor(downloadSpeedLimit)}`)
+      console.log(
+        `[DownProc] Applying direct-download speed limit for ${item.releaseName}: ${Math.floor(downloadSpeedLimit)} KiB/s`
+      )
+    }
 
     const rcloneLogTail: string[] = []
     const maxLogLines = 50
@@ -319,7 +343,13 @@ export class DownloadProcessor {
     let lastTransferredBytes = 0
     let lastAdvanceAt = Date.now()
     let killedByStallWatchdog = false
+    let stallThresholdAtKillMs = 0
     let stallWatchdog: NodeJS.Timeout | null = null
+
+    const getCurrentStallThresholdMs = (): number =>
+      lastTransferredBytes > 0
+        ? DownloadProcessor.PUBLIC_DOWNLOAD_STALL_IDLE_AFTER_PROGRESS_TIMEOUT_MS
+        : DownloadProcessor.PUBLIC_DOWNLOAD_STALL_NO_DATA_TIMEOUT_MS
 
     const parseTransferredBytes = (line: string): number | null => {
       const transferMatch = line.match(
@@ -422,17 +452,18 @@ export class DownloadProcessor {
         if (!currentItem || currentItem.status !== 'Downloading') return
 
         const idleMs = Date.now() - lastAdvanceAt
-        if (
-          idleMs >= DownloadProcessor.PUBLIC_DOWNLOAD_STALL_TIMEOUT_MS &&
-          (lastProgress < 100 || lastTransferredBytes === 0)
-        ) {
+        const stallThresholdMs = getCurrentStallThresholdMs()
+        if (idleMs >= stallThresholdMs && lastProgress < 100) {
           killedByStallWatchdog = true
+          stallThresholdAtKillMs = stallThresholdMs
+          const phase =
+            lastTransferredBytes > 0 ? 'after transfer activity' : 'before first transferred byte'
           console.error(
-            `[DownProc] Detected stalled rclone download for ${item.releaseName} (no transfer progress for ${Math.round(idleMs / 1000)}s). Terminating process.`
+            `[DownProc] Detected stalled rclone download for ${item.releaseName} (${phase}; no transfer progress for ${Math.round(idleMs / 1000)}s). Terminating process.`
           )
           rcloneProcess.kill('SIGTERM')
         }
-      }, 10000)
+      }, DownloadProcessor.PUBLIC_DOWNLOAD_STALL_POLL_INTERVAL_MS)
 
       console.log(
         `[DownProc] rclone process started for ${item.releaseName} with PID: ${rcloneProcess.pid}`
@@ -486,8 +517,11 @@ export class DownloadProcessor {
 
       let errorMessage = 'Public endpoint download failed.'
       if (killedByStallWatchdog) {
+        const thresholdSeconds = Math.round(
+          (stallThresholdAtKillMs || getCurrentStallThresholdMs()) / 1000
+        )
         errorMessage = `Download stalled: no transfer progress for ${Math.round(
-          DownloadProcessor.PUBLIC_DOWNLOAD_STALL_TIMEOUT_MS / 1000
+          thresholdSeconds
         )}s`
       } else if (isExecaError(error)) {
         errorMessage = error.shortMessage || error.message

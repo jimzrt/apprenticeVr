@@ -1,3 +1,14 @@
+# v1.3.8
+
+- Improve direct-download reliability with stronger rclone retry/timeout settings and safer transfer concurrency.
+- Apply configured download speed limits to direct rclone downloads as bandwidth limits.
+- Add adaptive stall detection windows for public downloads to reduce false-positive stall failures.
+- Fix retry behavior for `InstallError` items to reuse existing local payloads instead of forcing re-download.
+- Improve update fallback flow when completed queue entries are missing by automatically re-queuing download.
+- Add `Download Only` action for installed titles from the game details dialog.
+- Add FUSE diagnostics in Settings with status check, installer shortcut, and removal guidance shortcut.
+- Add startup FUSE warning dialog with remediation options when FUSE is unavailable.
+
 # v1.3.7
 
 - Add persistent Local Library indexing with startup + scheduled rescans to track stored files across app restarts.

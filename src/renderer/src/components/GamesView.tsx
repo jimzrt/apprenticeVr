@@ -937,6 +937,8 @@ const GamesView: React.FC<GamesViewProps> = ({ onBackToDevices }) => {
   const shouldFallbackToRedownload = (error: unknown): boolean => {
     const message = error instanceof Error ? error.message : String(error)
     return (
+      message.includes('COMPLETED_ITEM_NOT_FOUND') ||
+      message.includes('Item not found:') ||
       message.includes('LOCAL_FILES_MISSING') ||
       message.includes('LOCAL_PATH_OUTSIDE_ACTIVE_DOWNLOAD_ROOT')
     )

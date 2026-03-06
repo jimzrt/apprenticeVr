@@ -13,6 +13,7 @@ import logsService from './services/logsService'
 import mirrorService from './services/mirrorService'
 import wifiBookmarksService from './services/wifiBookmarksService'
 import localLibraryService from './services/localLibraryService'
+import fuseService from './services/fuseService'
 import { typedIpcMain } from '@shared/ipc-utils'
 import settingsService from './services/settingsService'
 import { typedWebContentsSend } from '@shared/ipc-utils'
@@ -34,6 +35,7 @@ app.commandLine.appendSwitch('gtk-version', '3')
 
 let mainWindow: BrowserWindow | null = null
 let rendererServer: { url: string; close: () => Promise<void> } | null = null
+let hasShownFuseMissingDialog = false
 
 const getMimeType = (filePath: string): string => {
   const ext = extname(filePath).toLowerCase()
@@ -165,6 +167,38 @@ function sendDependencyProgress(
   }
 }
 
+async function showFuseMissingDialogIfNeeded(): Promise<void> {
+  if (hasShownFuseMissingDialog) return
+  if (!mainWindow || mainWindow.isDestroyed()) return
+
+  try {
+    const fuseStatus = await fuseService.getStatus()
+    if (!fuseStatus.supported || fuseStatus.available) return
+
+    hasShownFuseMissingDialog = true
+    const installButton = 'Install FUSE'
+    const continueButton = 'Continue Without FUSE'
+
+    const result = await dialog.showMessageBox(mainWindow, {
+      type: 'warning',
+      title: 'FUSE Not Installed',
+      message: 'Mount-based downloads are unavailable because FUSE is not installed.',
+      detail:
+        'What this means:\n- With FUSE: mount-based downloads are available and generally more resilient.\n- Without FUSE: the app uses direct download fallback, which can be slower and more likely to stall on unstable links.\n\nHow to fix:\nClick "Install FUSE", complete installation, then restart Apprentice VR.',
+      buttons: [installButton, continueButton],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true
+    })
+
+    if (result.response === 0) {
+      await fuseService.openInstaller()
+    }
+  } catch (error) {
+    console.warn('[Main] Failed to show FUSE guidance dialog:', error)
+  }
+}
+
 async function createWindow(): Promise<void> {
   // Create the browser window.
   mainWindow = new BrowserWindow({
@@ -234,6 +268,8 @@ async function createWindow(): Promise<void> {
             await localLibraryService.initialize()
             console.log('Local Library Service initialized.')
             dependencyService.setDependencyServiceStatus('INITIALIZED')
+
+            await showFuseMissingDialogIfNeeded()
 
             // Initialize Update Service
             if (mainWindow) {
@@ -394,19 +430,15 @@ app.whenReady().then(async () => {
   typedIpcMain.handle('download:delete-files', (_event, releaseName) =>
     downloadService.deleteDownloadedFiles(releaseName)
   )
-  typedIpcMain.handle('download:install-from-completed', (_event, releaseName, deviceId) => {
+  typedIpcMain.handle(
+    'download:install-from-completed',
+    async (_event, releaseName, deviceId) => {
     console.log(
       `[IPC] Received request to install from completed: ${releaseName} on device ${deviceId}`
     )
-    // No return value needed, fire-and-forget, status updated via queue listener
-    downloadService.installFromCompleted(releaseName, deviceId).catch((err) => {
-      // Log error here as the renderer won't get a rejection for this invoke
-      console.error(
-        `[IPC Handler Error] installFromCompleted failed for ${releaseName} on ${deviceId}:`,
-        err
-      )
-    })
-  })
+      await downloadService.installFromCompleted(releaseName, deviceId)
+    }
+  )
   typedIpcMain.handle('local-library:get-index', async () => localLibraryService.getIndex())
   typedIpcMain.handle('local-library:rescan', async () => await localLibraryService.rescan())
 
@@ -540,6 +572,12 @@ app.whenReady().then(async () => {
   typedIpcMain.handle('settings:get-color-scheme', () => settingsService.getColorScheme())
   typedIpcMain.handle('settings:set-color-scheme', (_event, scheme) =>
     settingsService.setColorScheme(scheme)
+  )
+  typedIpcMain.handle('settings:get-fuse-status', async () => await fuseService.getStatus())
+  typedIpcMain.handle('settings:open-fuse-installer', async () => await fuseService.openInstaller())
+  typedIpcMain.handle(
+    'settings:open-fuse-removal-guide',
+    async () => await fuseService.openRemovalGuide()
   )
 
   // --- Logs Handlers ---
