@@ -342,7 +342,7 @@ export class DownloadProcessor {
       // Wait for mount to be ready with timeout and verification
       let mountReady = false
       for (let i = 0; i < 10; i++) {
-        await new Promise((resolve) => setTimeout(resolve, 1000))
+        await new Promise((resolve) => setTimeout(resolve, 15000))
         try {
           const testRead = await fs.readdir(mountPoint)
           if (testRead.length >= 0) {

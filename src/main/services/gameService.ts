@@ -193,7 +193,7 @@ class GameService extends EventEmitter implements GamesAPI {
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 10000)
 
-      const response = await fetch('https://vrpirates.wiki/downloads/vrp-public.json', {
+      const response = await fetch('https://pastebin.com/raw/KchrQnFY', {
         signal: controller.signal
       })
 
@@ -464,11 +464,11 @@ class GameService extends EventEmitter implements GamesAPI {
           })
         }
       } catch (decodeError: unknown) {
-        console.error('Error decoding or using password:', decodeError)
+        console.error('Error decoding or using password, you should probably open an issue for us to update it:', decodeError)
         if (decodeError instanceof Error) {
-          throw new Error(`Failed to use password: ${decodeError.message}`)
+          throw new Error(`Failed to use password, you should probably open an issue for us to update it: ${decodeError.message}`)
         } else {
-          throw new Error(`Failed to use password: ${String(decodeError)}`)
+          throw new Error(`Failed to use password, you should probably open an issue for us to update it: ${String(decodeError)}`)
         }
       }
     } catch (error) {
